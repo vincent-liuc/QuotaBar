@@ -48,8 +48,14 @@ actor APIClient: UsageFetching {
 
     private func fetchUsage(token: String) async throws -> UsageData {
         async let weeklyUsage = fetchWeeklyUsage(token: token)
-        async let keys = fetchAllKeys(token: token)
-        return try await UsageData(weeklyUsage: weeklyUsage, keys: keys)
+        let keys = try await fetchAllKeys(token: token).filter(\.isActive)
+        let usageByKeyID = try await fetchTodayUsage(token: token, keyIDs: keys.map(\.id))
+        let keysWithTodayUsage = keys.map { key in
+            var updated = key
+            updated.todayActualCost = usageByKeyID[key.id] ?? 0
+            return updated
+        }
+        return try await UsageData(weeklyUsage: weeklyUsage, keys: keysWithTodayUsage)
     }
 
     private func validToken(credentials: Credentials) async throws -> String {
@@ -166,6 +172,25 @@ actor APIClient: UsageFetching {
 
         let envelope: APIEnvelope<KeyListData> = try await send(request)
         return envelope.data
+    }
+
+    private func fetchTodayUsage(token: String, keyIDs: [Int]) async throws -> [Int: Double] {
+        guard !keyIDs.isEmpty else { return [:] }
+
+        var request = URLRequest(
+            url: baseURL.appending(path: "/api/v1/usage/dashboard/api-keys-usage")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(APIKeyUsagePayload(apiKeyIDs: keyIDs))
+
+        let envelope: APIEnvelope<APIKeyUsageData> = try await send(request)
+        var usageByKeyID: [Int: Double] = [:]
+        for stat in envelope.data.stats.values {
+            usageByKeyID[stat.apiKeyID] = max(stat.todayActualCost, 0)
+        }
+        return usageByKeyID
     }
 
     private func send<Value: Decodable>(_ request: URLRequest) async throws -> APIEnvelope<Value> {

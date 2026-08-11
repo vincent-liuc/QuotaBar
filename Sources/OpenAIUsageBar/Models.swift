@@ -36,6 +36,28 @@ struct KeyListData: Decodable, Sendable {
     }
 }
 
+struct APIKeyUsagePayload: Codable, Sendable {
+    let apiKeyIDs: [Int]
+
+    enum CodingKeys: String, CodingKey {
+        case apiKeyIDs = "api_key_ids"
+    }
+}
+
+struct APIKeyUsageData: Decodable, Sendable {
+    let stats: [String: APIKeyUsageStat]
+}
+
+struct APIKeyUsageStat: Decodable, Sendable {
+    let apiKeyID: Int
+    let todayActualCost: Double
+
+    enum CodingKeys: String, CodingKey {
+        case apiKeyID = "api_key_id"
+        case todayActualCost = "today_actual_cost"
+    }
+}
+
 struct SubscriptionGroup: Decodable, Sendable {
     let weeklyLimitUSD: Double?
 
@@ -76,6 +98,7 @@ struct UsageKey: Decodable, Equatable, Sendable {
     let quota: Double
     let quotaUsed: Double
     let updatedAt: Date?
+    var todayActualCost: Double = 0
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, quota
@@ -100,7 +123,6 @@ struct UsageSnapshot: Equatable, Sendable {
     let fetchedAt: Date
 
     var serverUpdatedAt: Date? { keys.compactMap(\.updatedAt).max() }
-    var activeCount: Int { keys.filter(\.isActive).count }
 
     var remaining: Double { max(total - used, 0) }
 
@@ -112,9 +134,9 @@ struct UsageSnapshot: Equatable, Sendable {
     var isOverQuota: Bool { total > 0 && used > total }
 
     init(weeklyUsage: WeeklyUsage, keys: [UsageKey], fetchedAt: Date = Date()) {
-        self.keys = keys.sorted { lhs, rhs in
-            if lhs.quotaUsed != rhs.quotaUsed {
-                return lhs.quotaUsed > rhs.quotaUsed
+        self.keys = keys.filter(\.isActive).sorted { lhs, rhs in
+            if lhs.todayActualCost != rhs.todayActualCost {
+                return lhs.todayActualCost > rhs.todayActualCost
             }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }

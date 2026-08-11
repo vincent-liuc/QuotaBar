@@ -8,6 +8,7 @@ final class UsagePopoverController: NSViewController {
     private let headerIcon = NSImageView()
     private let refreshButton = NSButton()
     private let settingsButton = NSButton()
+    private let headerUpdatedLabel = NSTextField(labelWithString: "")
     private var bodyView: NSView?
 
     init(store: UsageStore, showPreferences: @escaping () -> Void) {
@@ -71,6 +72,9 @@ final class UsagePopoverController: NSViewController {
         refreshButton.isEnabled = !store.isRefreshing
         settingsButton.image = symbol("gearshape")
         settingsButton.toolTip = "偏好设置"
+        headerUpdatedLabel.stringValue = store.snapshot.map {
+            "更新于 \(timeFormatter.string(from: $0.fetchedAt))"
+        } ?? ""
         headerIcon.image = StatusRingRenderer.image(
             progress: store.snapshot?.progress,
             phase: store.phase
@@ -94,7 +98,7 @@ final class UsagePopoverController: NSViewController {
         ])
 
         let title = label("OpenAI用量", size: 13, weight: .semibold)
-        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        title.setContentHuggingPriority(.required, for: .horizontal)
 
         configureIconButton(refreshButton, symbolName: "arrow.clockwise", toolTip: "立即刷新")
         refreshButton.target = self
@@ -104,10 +108,21 @@ final class UsagePopoverController: NSViewController {
         settingsButton.target = self
         settingsButton.action = #selector(openPreferences)
 
-        let stack = NSStackView(views: [headerIcon, title, refreshButton, settingsButton])
+        let actions = NSStackView(views: [refreshButton, settingsButton])
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 2
+
+        headerUpdatedLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        headerUpdatedLabel.textColor = .secondaryLabelColor
+        headerUpdatedLabel.lineBreakMode = .byClipping
+        headerUpdatedLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let spacer = NSView()
+        let stack = NSStackView(views: [headerIcon, title, actions, spacer, headerUpdatedLabel])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 10
+        stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 12)
         return stack
     }
@@ -143,9 +158,9 @@ private final class UsageContentView: NSView {
 
         if let snapshot = store.snapshot {
             content.addArrangedSubview(makeUsageRow(snapshot))
-            content.addArrangedSubview(makeStatusRow(snapshot))
             content.addArrangedSubview(separator())
-            content.addArrangedSubview(makeKeyDetails(snapshot.keys))
+            let keyDetails = makeKeyDetails(snapshot.keys)
+            content.addArrangedSubview(keyDetails)
         } else if store.phase == .loading {
             content.addArrangedSubview(makeLoadingView())
         }
@@ -153,9 +168,6 @@ private final class UsageContentView: NSView {
         if case .failed(let message) = store.phase {
             content.addArrangedSubview(makeErrorView(message))
         }
-
-        content.addArrangedSubview(separator())
-        content.addArrangedSubview(makeFooter(store))
     }
 
     required init?(coder: NSCoder) {
@@ -202,33 +214,11 @@ private final class UsageContentView: NSView {
         return row
     }
 
-    private func makeStatusRow(_ snapshot: UsageSnapshot) -> NSView {
-        let status = label("共 \(snapshot.keys.count) 个 API Key · \(snapshot.activeCount) 个使用中",
-                           size: 11,
-                           color: .secondaryLabelColor)
-        let updated = label("更新于 \(timeFormatter.string(from: snapshot.fetchedAt))",
-                            size: 11,
-                            color: .secondaryLabelColor)
-        let spacer = NSView()
-        let row = NSStackView(views: [status, spacer, updated])
-        row.orientation = .horizontal
-        row.widthAnchor.constraint(equalToConstant: 294).isActive = true
-        return row
-    }
-
     private func makeKeyDetails(_ keys: [UsageKey]) -> NSView {
-        let title = label("API Key 明细", size: 12, weight: .semibold)
-        let count = label("\(keys.count) 个", size: 11, color: .secondaryLabelColor)
-        let spacer = NSView()
-        let header = NSStackView(views: [title, spacer, count])
-        header.orientation = .horizontal
-        header.alignment = .firstBaseline
-        header.widthAnchor.constraint(equalToConstant: 294).isActive = true
-
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 0
+        stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         if keys.isEmpty {
@@ -238,16 +228,13 @@ private final class UsageContentView: NSView {
             empty.heightAnchor.constraint(equalToConstant: 48).isActive = true
             stack.addArrangedSubview(empty)
         } else {
-            for (index, key) in keys.enumerated() {
+            for key in keys {
                 stack.addArrangedSubview(makeKeyRow(key))
-                if index < keys.count - 1 {
-                    stack.addArrangedSubview(keySeparator())
-                }
             }
         }
 
         let listView: NSView
-        if keys.count <= 3 {
+        if keys.count <= 6 {
             listView = stack
         } else {
             let documentView = FlippedView()
@@ -270,24 +257,20 @@ private final class UsageContentView: NSView {
             scroll.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
                 scroll.widthAnchor.constraint(equalToConstant: 294),
-                scroll.heightAnchor.constraint(equalToConstant: 174)
+                scroll.heightAnchor.constraint(equalToConstant: 172)
             ])
             listView = scroll
         }
 
-        let section = NSStackView(views: [header, listView])
-        section.orientation = .vertical
-        section.alignment = .leading
-        section.spacing = 7
-        return section
+        return listView
     }
 
     private func makeKeyRow(_ key: UsageKey) -> NSView {
-        let dot = label("●", size: 8, color: key.isActive ? .systemGreen : .systemOrange)
-        dot.toolTip = key.isActive ? "使用中" : key.status
+        let dot = label("●", size: 8, color: .systemGreen)
+        dot.toolTip = "已启用"
         let name = label(key.name, size: 11, weight: .medium)
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let value = label("\(currency(key.quotaUsed)) / \(currency(key.quota))",
+        let value = label("今日 \(currency(key.todayActualCost))",
                           size: 11,
                           color: .secondaryLabelColor)
         value.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
@@ -298,31 +281,12 @@ private final class UsageContentView: NSView {
         top.alignment = .firstBaseline
         top.spacing = 6
 
-        let progress = NSProgressIndicator()
-        progress.style = .bar
-        progress.minValue = 0
-        progress.maxValue = 1
-        progress.doubleValue = key.progress
-        progress.isIndeterminate = false
-        progress.controlSize = .mini
-        progress.translatesAutoresizingMaskIntoConstraints = false
-        progress.heightAnchor.constraint(equalToConstant: 5).isActive = true
-
-        let row = NSStackView(views: [top, progress])
-        row.orientation = .vertical
-        row.alignment = .leading
-        row.spacing = 8
-        row.edgeInsets = NSEdgeInsets(top: 7, left: 0, bottom: 7, right: 0)
-        row.widthAnchor.constraint(equalToConstant: 294).isActive = true
-        progress.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
-        return row
-    }
-
-    private func keySeparator() -> NSBox {
-        let box = NSBox()
-        box.boxType = .separator
-        box.widthAnchor.constraint(equalToConstant: 294).isActive = true
-        return box
+        top.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+        NSLayoutConstraint.activate([
+            top.widthAnchor.constraint(equalToConstant: 294),
+            top.heightAnchor.constraint(equalToConstant: 27)
+        ])
+        return top
     }
 
     private func makeLoadingView() -> NSView {
@@ -355,19 +319,6 @@ private final class UsageContentView: NSView {
         return stack
     }
 
-    private func makeFooter(_ store: UsageStore) -> NSView {
-        let seconds = Int(store.preferences.refreshInterval)
-        let frequency = label("每 \(seconds) 秒自动刷新", size: 11, color: .secondaryLabelColor)
-        let quit = NSButton(title: "退出", target: NSApplication.shared, action: #selector(NSApplication.terminate(_:)))
-        quit.isBordered = false
-        quit.font = NSFont.systemFont(ofSize: 11)
-        let spacer = NSView()
-        let row = NSStackView(views: [frequency, spacer, quit])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.widthAnchor.constraint(equalToConstant: 294).isActive = true
-        return row
-    }
 }
 
 private final class FlippedView: NSView {

@@ -42,12 +42,13 @@ enum SelfTest {
         require(result.data.page == 1, "page")
         require(result.data.pageSize == 100, "page_size")
         require(result.data.pages == 1, "pages")
+        require(result.data.items.first?.todayActualCost == 0, "today cost defaults to zero")
     }
 
     private static func testWeeklyUsageAndProgress() {
         let keys = [
-            usageKey(id: 2, total: 100, used: 25, status: "disabled"),
-            usageKey(id: 1, total: 400, used: 100)
+            usageKey(id: 2, total: 100, used: 25, today: 5, status: "disabled"),
+            usageKey(id: 1, total: 400, used: 100, today: 10)
         ]
         let normal = UsageSnapshot(
             weeklyUsage: WeeklyUsage(used: 90, total: 300),
@@ -66,8 +67,8 @@ enum SelfTest {
         require(normal.total == 300, "subscription weekly total")
         require(normal.used == 90, "subscription weekly used")
         require(normal.remaining == 210, "subscription weekly remaining")
-        require(normal.activeCount == 1, "active key count")
-        require(normal.keys.map(\.id) == [1, 2], "keys sorted by usage descending")
+        require(normal.keys.count == 1, "active key count")
+        require(normal.keys.map(\.id) == [1], "inactive keys excluded from snapshot")
         require(over.progress == 1, "over-quota progress")
         require(over.remaining == 0, "remaining lower bound")
         require(over.isOverQuota, "over-quota flag")
@@ -89,6 +90,7 @@ enum SelfTest {
 
     private static func testPaginationAndDeduplication() async throws {
         let requestedPages = LockedPages()
+        let requestedUsageIDs = LockedPages()
         MockURLProtocol.requestHandler = { request in
             let url = try requireURL(request)
             if url.path == "/api/v1/auth/login" {
@@ -106,6 +108,18 @@ enum SelfTest {
                 return mockResponse(
                     url: url,
                     json: #"{"code":0,"message":"success","data":[{"status":"active","weekly_usage_usd":52.71,"group":{"weekly_limit_usd":500}}]}"#
+                )
+            }
+            if url.path == "/api/v1/usage/dashboard/api-keys-usage" {
+                guard request.httpMethod == "POST" else {
+                    throw APIClientError.invalidResponse
+                }
+                let body = try requestBody(request)
+                let payload = try JSONDecoder().decode(APIKeyUsagePayload.self, from: body)
+                payload.apiKeyIDs.forEach(requestedUsageIDs.append)
+                return mockResponse(
+                    url: url,
+                    json: #"{"code":0,"message":"success","data":{"stats":{"1":{"api_key_id":1,"today_actual_cost":1.25,"total_actual_cost":10},"2":{"api_key_id":2,"today_actual_cost":8.5,"total_actual_cost":25}}}}"#
                 )
             }
 
@@ -145,8 +159,10 @@ enum SelfTest {
         )
 
         require(requestedPages.values == [1, 2], "all pages requested")
-        require(usage.keys.map(\.id) == [1, 2, 3], "paginated keys deduplicated")
+        require(requestedUsageIDs.values == [1, 2], "today usage requested for active keys only")
+        require(usage.keys.map(\.id) == [1, 2], "inactive keys excluded")
         require(usage.keys.first(where: { $0.id == 2 })?.quotaUsed == 25, "duplicate key refreshed")
+        require(usage.keys.first(where: { $0.id == 2 })?.todayActualCost == 8.5, "today usage merged by key id")
         require(usage.weeklyUsage.used == 52.71, "weekly usage decoded")
         require(usage.weeklyUsage.total == 500, "nested weekly limit decoded")
     }
@@ -172,10 +188,28 @@ enum SelfTest {
         return url
     }
 
+    private static func requestBody(_ request: URLRequest) throws -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { throw APIClientError.invalidResponse }
+
+        stream.open()
+        defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1_024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 { throw stream.streamError ?? APIClientError.invalidResponse }
+            if count == 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+
     private static func usageKey(
         id: Int,
         total: Double,
         used: Double,
+        today: Double = 0,
         status: String = "active"
     ) -> UsageKey {
         UsageKey(
@@ -184,7 +218,8 @@ enum SelfTest {
             status: status,
             quota: total,
             quotaUsed: used,
-            updatedAt: nil
+            updatedAt: nil,
+            todayActualCost: today
         )
     }
 
