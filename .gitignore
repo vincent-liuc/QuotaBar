@@ -1,0 +1,23 @@
+.DS_Store
+
+# Swift / Xcode
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# .NET / Visual Studio
+**/bin/
+**/obj/
+**/artifacts/
+.vs/
+*.user
+*.suo
+*.nupkg
+
+# Local packaging and temporary files
+outputs/
+work/
+OpenAIUsageWindows/
+*.dmg
+*.zip
