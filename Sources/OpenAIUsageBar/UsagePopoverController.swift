@@ -404,7 +404,7 @@ private final class UsageContentView: NSView {
         let container = HairlineSeparatorView()
         NSLayoutConstraint.activate([
             container.widthAnchor.constraint(equalToConstant: 286),
-            container.heightAnchor.constraint(equalToConstant: 17)
+            container.heightAnchor.constraint(equalToConstant: 13)
         ])
         return container
     }
@@ -504,12 +504,26 @@ private final class HairlineSeparatorView: NSView {
         super.draw(dirtyRect)
         let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         let lineWidth = 1 / scale
+        let y = floor(bounds.midY * scale) / scale + lineWidth / 2
         let path = NSBezierPath()
-        path.move(to: NSPoint(x: bounds.minX, y: bounds.midY))
-        path.line(to: NSPoint(x: bounds.maxX, y: bounds.midY))
+        path.move(to: NSPoint(x: bounds.minX + 8, y: y))
+        path.line(to: NSPoint(x: bounds.maxX - 8, y: y))
         path.lineWidth = lineWidth
-        NSColor.separatorColor.withAlphaComponent(0.08).setStroke()
+        path.lineCapStyle = .round
+        dividerColor.setStroke()
         path.stroke()
+    }
+
+    private var dividerColor: NSColor {
+        let match = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+        return match == .darkAqua
+            ? NSColor.white.withAlphaComponent(0.07)
+            : NSColor.black.withAlphaComponent(0.04)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 
     override func viewDidChangeBackingProperties() {
