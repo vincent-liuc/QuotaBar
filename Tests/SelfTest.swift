@@ -204,7 +204,7 @@ enum SelfTest {
                 payload.apiKeyIDs.forEach(requestedUsageIDs.append)
                 return mockResponse(
                     url: url,
-                    json: #"{"code":0,"message":"success","data":{"stats":{"1":{"api_key_id":1,"today_actual_cost":1.25,"total_actual_cost":10},"2":{"api_key_id":2,"today_actual_cost":8.5,"total_actual_cost":25}}}}"#
+                    json: #"{"code":0,"message":"success","data":{"stats":{"2":{"api_key_id":2,"today_actual_cost":8.5,"total_actual_cost":25}}}}"#
                 )
             }
 
@@ -254,6 +254,7 @@ enum SelfTest {
         require(usage.keys.map(\.id) == [1, 2], "inactive keys excluded")
         require(usage.keys.first(where: { $0.id == 2 })?.quotaUsed == 25, "duplicate key refreshed")
         require(usage.keys.first(where: { $0.id == 2 })?.todayActualCost == 8.5, "today usage merged by key id")
+        require(usage.keys.first(where: { $0.id == 1 })?.todayActualCost == 0, "missing stat is zero when endpoint succeeds")
         require(usage.keys.first(where: { $0.id == 1 })?.concurrency == 2, "current concurrency retained")
         require(usage.weeklyUsage?.used == 52.71, "weekly usage decoded")
         require(usage.weeklyUsage?.total == 500, "nested weekly limit decoded")

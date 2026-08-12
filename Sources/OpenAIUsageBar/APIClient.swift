@@ -112,7 +112,7 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         let weeklyUsage = subscriptionResult.flatMap { selectWeeklyUsage($0, selection: profile.subscriptionSelection) }
         let keysWithUsage = keys.map { key in
             var updated = key
-            updated.todayActualCost = usageResult?[key.id]
+            updated.todayActualCost = usageResult.map { $0[key.id] ?? 0 }
             return updated
         }
         var capabilities: Set<StationCapability> = []

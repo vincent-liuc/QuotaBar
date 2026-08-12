@@ -71,6 +71,7 @@ final class UsageStore {
         showMetricCards: Bool,
         makeActive: Bool = true
     ) async throws {
+        settingsMessage = nil
         try validate(credentials)
         var validatedProfile = try profile.validated()
         let testResult = try await client.testConnection(profile: validatedProfile, credentials: credentials)
@@ -130,6 +131,7 @@ final class UsageStore {
     }
 
     func deleteProfile(_ id: UUID) async throws {
+        settingsMessage = nil
         guard profiles.count > 1 else { throw StationProfileError.cannotDeleteOnlyStation }
         try credentialStore.delete(for: id)
         profiles.removeAll { $0.id == id }

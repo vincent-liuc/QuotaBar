@@ -29,7 +29,7 @@
 
 用户在设置中填写的是对应 Sub2API 站点的账号和密码，不应填写 OpenAI、ChatGPT 或其他服务的账号密码。每个站点的凭据在钥匙串中独立保存。登录时，凭据会通过 HTTPS 发送到该站点的 `/api/v1/auth/login`；随后应用使用短期访问令牌读取：
 
-- `/api/v1/subscriptions?timezone=Asia/Shanghai`：每周已用额度和每周总额度
+- `/api/v1/subscriptions?timezone=<站点时区>`：每周已用额度和每周总额度
 - `/api/v1/keys`：API Key 名称、启用状态和当前并发
 - `/api/v1/usage/dashboard/stats`：累计 Token 和累计实际消费金额
 - `/api/v1/usage/dashboard/api-keys-usage`：启用 API Key 的当日实际用量

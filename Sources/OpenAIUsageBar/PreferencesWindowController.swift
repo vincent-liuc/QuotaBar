@@ -537,7 +537,10 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func showError(_ error: Error) {
-        messageLabel.stringValue = store.settingsMessage ?? error.localizedDescription
+        let launchError = store.settingsMessage.flatMap {
+            $0.hasPrefix("开机启动设置失败") ? $0 : nil
+        }
+        messageLabel.stringValue = launchError ?? error.localizedDescription
         messageLabel.isHidden = false
         selectTab(at: error is StationProfileError ? 0 : 1)
     }
