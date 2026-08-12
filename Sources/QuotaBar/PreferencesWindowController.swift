@@ -19,23 +19,27 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate {
         window.center()
         super.init(window: window)
         window.delegate = self
-        preferencesController.onSaved = { [weak window] in window?.performClose(nil) }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func present() {
+        preferencesController.reloadFromStore()
         showWindow(nil)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
+        window?.makeFirstResponder(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.makeFirstResponder(nil)
+        return true
     }
 }
 
 @MainActor
 private final class PreferencesViewController: NSViewController, NSTextFieldDelegate {
-    var onSaved: (() -> Void)?
-
     private let store: UsageStore
     private let updater = AppUpdater()
     private var editingProfile: StationProfile
@@ -63,11 +67,12 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let testButton = NSButton(title: "测试连接", target: nil, action: nil)
     private let updateStatusLabel = settingsLabel("尚未检查", size: 11, color: .secondaryLabelColor)
     private let updateButton = NSButton(title: "检查更新", target: nil, action: nil)
-    private let saveButton = NSButton(title: "保存", target: nil, action: nil)
     private let tabContainer = NSView()
     private var tabButtons: [SettingsTabButton] = []
     private var tabViews: [NSView] = []
     private var selectedTab = 0
+    private var isLoadingControls = false
+    private var statusBarHeightConstraint: NSLayoutConstraint?
 
     init(store: UsageStore) {
         self.store = store
@@ -78,19 +83,26 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    func reloadFromStore() {
+        guard isViewLoaded else { return }
+        profiles = store.profiles
+        loadProfile(store.activeProfile ?? editingProfile)
+    }
+
     override func loadView() {
         configureControls()
         let root = NSView()
         let profileBar = makeProfileBar()
         let header = makeTabHeader()
         let body = makeTabBody()
-        let footer = makeFooter()
+        let statusBar = makeStatusBar()
         let headerDivider = settingsSeparator()
-        let footerDivider = settingsSeparator()
-        [profileBar, header, headerDivider, body, footerDivider, footer].forEach {
+        [profileBar, header, headerDivider, body, statusBar].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview($0)
         }
+        let statusBarHeight = statusBar.heightAnchor.constraint(equalToConstant: 0)
+        statusBarHeightConstraint = statusBarHeight
         NSLayoutConstraint.activate([
             root.widthAnchor.constraint(equalToConstant: 540),
             root.heightAnchor.constraint(equalToConstant: 450),
@@ -108,14 +120,11 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             body.topAnchor.constraint(equalTo: headerDivider.bottomAnchor),
             body.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             body.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            footerDivider.topAnchor.constraint(equalTo: body.bottomAnchor),
-            footerDivider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            footerDivider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            footer.topAnchor.constraint(equalTo: footerDivider.bottomAnchor),
-            footer.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            footer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            footer.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            footer.heightAnchor.constraint(equalToConstant: 48)
+            statusBar.topAnchor.constraint(equalTo: body.bottomAnchor),
+            statusBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            statusBar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            statusBar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            statusBarHeight
         ])
         view = root
         loadProfile(editingProfile)
@@ -150,6 +159,14 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         let timezoneIDs = ["Asia/Shanghai", TimeZone.current.identifier, "UTC"].uniqued()
         timezonePopup.addItems(withTitles: timezoneIDs)
         subscriptionPopup.addItem(withTitle: "自动选择")
+        timezonePopup.target = self
+        timezonePopup.action = #selector(profileSelectionChanged)
+        subscriptionPopup.target = self
+        subscriptionPopup.action = #selector(profileSelectionChanged)
+        [launchAtLoginSwitch, showAPIKeyDetailsSwitch, showMetricCardsSwitch, showUsageHistorySwitch].forEach {
+            $0.target = self
+            $0.action = #selector(preferenceControlChanged)
+        }
 
         configureIconButton(addProfileButton, symbol: "plus", toolTip: "添加站点")
         configureIconButton(deleteProfileButton, symbol: "minus", toolTip: "删除站点")
@@ -163,10 +180,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         testButton.action = #selector(testConnection)
         updateButton.target = self
         updateButton.action = #selector(checkForUpdates)
-        saveButton.target = self
-        saveButton.action = #selector(save)
-        saveButton.keyEquivalent = "\r"
-        [testButton, updateButton, saveButton].forEach { $0.bezelStyle = .rounded }
+        [testButton, updateButton].forEach { $0.bezelStyle = .rounded }
         messageLabel.maximumNumberOfLines = 2
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.isHidden = true
@@ -352,14 +366,11 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         return settingsRow(title: title, control: field)
     }
 
-    private func makeFooter() -> NSView {
-        let cancel = NSButton(title: "取消", target: self, action: #selector(cancel))
-        cancel.bezelStyle = .rounded
-        let stack = NSStackView(views: [messageLabel, NSView(), cancel, saveButton])
+    private func makeStatusBar() -> NSView {
+        let stack = NSStackView(views: [messageLabel, NSView()])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 20, bottom: 8, right: 20)
+        stack.edgeInsets = NSEdgeInsets(top: 3, left: 20, bottom: 5, right: 20)
         return stack
     }
 
@@ -379,12 +390,19 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         button.widthAnchor.constraint(equalToConstant: 28).isActive = true
     }
 
-    func controlTextDidChange(_ obj: Notification) { updateSaveButton() }
+    func controlTextDidChange(_ obj: Notification) {
+        clearMessage()
+    }
 
     func controlTextDidEndEditing(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField, field === refreshField else { return }
-        refreshField.integerValue = Int(UserPreferences.normalizedRefreshInterval(field.doubleValue))
-        refreshStepper.integerValue = refreshField.integerValue
+        guard !isLoadingControls, let field = obj.object as? NSTextField else { return }
+        if field === refreshField {
+            refreshField.integerValue = Int(UserPreferences.normalizedRefreshInterval(field.doubleValue))
+            refreshStepper.integerValue = refreshField.integerValue
+            persistPreferences()
+        } else {
+            persistProfileFromControls()
+        }
     }
 
     private func profileFromControls() -> StationProfile {
@@ -406,6 +424,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func loadProfile(_ profile: StationProfile) {
+        isLoadingControls = true
+        defer { isLoadingControls = false }
         editingProfile = profile
         nameField.stringValue = profile.name
         serviceURLField.stringValue = profile.serviceURL
@@ -420,7 +440,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         connectionLabel.stringValue = capabilitySummary(profile)
         deleteProfileButton.isEnabled = profiles.count > 1
         reloadProfilePopup()
-        updateSaveButton()
     }
 
     private func reloadProfilePopup() {
@@ -474,7 +493,16 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
     @objc private func changeProfile() {
         guard profilePopup.indexOfSelectedItem >= 0 else { return }
-        loadProfile(profiles[profilePopup.indexOfSelectedItem])
+        let profile = profiles[profilePopup.indexOfSelectedItem]
+        loadProfile(profile)
+        guard store.profiles.contains(where: { $0.id == profile.id }) else { return }
+        Task {
+            do {
+                try await store.selectProfile(profile.id)
+            } catch {
+                showError(error)
+            }
+        }
     }
 
     @objc private func deleteProfile() {
@@ -513,6 +541,10 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
                 var checkedProfile = profileFromControls()
                 checkedProfile.capabilities = result.capabilities
                 checkedProfile.lastCheckedAt = result.checkedAt
+                try await store.updateProfile(checkedProfile, credentials: enteredCredentials)
+                editingProfile = store.activeProfile ?? checkedProfile
+                profiles = store.profiles
+                reloadProfilePopup()
                 connectionLabel.stringValue = capabilitySummary(checkedProfile)
             } catch { connectionLabel.stringValue = error.localizedDescription }
             testButton.title = "测试连接"
@@ -520,24 +552,45 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         }
     }
 
-    @objc private func save() {
-        saveButton.isEnabled = false
-        messageLabel.isHidden = true
+    private func persistProfileFromControls() {
+        guard !isLoadingControls else { return }
+        clearMessage()
+        let profile = profileFromControls()
+        let credentials = enteredCredentials
+        let isStoredProfile = store.profiles.contains { $0.id == profile.id }
+        if !isStoredProfile {
+            let isComplete = !profile.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !profile.serviceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !credentials.email.isEmpty
+                && !credentials.password.isEmpty
+            guard isComplete else { return }
+        }
         Task {
             do {
-                try await store.saveConfiguration(
-                    profile: profileFromControls(), credentials: enteredCredentials,
-                    refreshInterval: UserPreferences.normalizedRefreshInterval(refreshField.doubleValue),
-                    launchAtLogin: launchAtLoginSwitch.state == .on,
-                    showAPIKeyDetails: showAPIKeyDetailsSwitch.state == .on,
-                    showMetricCards: showMetricCardsSwitch.state == .on,
-                    showUsageHistory: showUsageHistorySwitch.state == .on
-                )
-                onSaved?()
+                try await store.updateProfile(profile, credentials: credentials)
+                editingProfile = store.activeProfile ?? profile
+                profiles = store.profiles
+                reloadProfilePopup()
+                connectionLabel.stringValue = capabilitySummary(editingProfile)
             } catch {
                 showError(error)
-                saveButton.isEnabled = true
             }
+        }
+    }
+
+    private func persistPreferences() {
+        guard !isLoadingControls else { return }
+        do {
+            try store.updatePreferences(UserPreferences(
+                refreshInterval: UserPreferences.normalizedRefreshInterval(refreshField.doubleValue),
+                launchAtLogin: launchAtLoginSwitch.state == .on,
+                showAPIKeyDetails: showAPIKeyDetailsSwitch.state == .on,
+                showMetricCards: showMetricCardsSwitch.state == .on,
+                showUsageHistory: showUsageHistorySwitch.state == .on
+            ))
+            clearMessage()
+        } catch {
+            showError(error)
         }
     }
 
@@ -547,11 +600,21 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         }
         messageLabel.stringValue = launchError ?? error.localizedDescription
         messageLabel.isHidden = false
+        statusBarHeightConstraint?.constant = 30
         selectTab(at: error is StationProfileError ? 0 : 1)
     }
 
-    @objc private func cancel() { view.window?.performClose(nil) }
-    @objc private func stepRefreshInterval() { refreshField.integerValue = refreshStepper.integerValue; updateSaveButton() }
+    private func clearMessage() {
+        messageLabel.isHidden = true
+        statusBarHeightConstraint?.constant = 0
+    }
+
+    @objc private func stepRefreshInterval() {
+        refreshField.integerValue = refreshStepper.integerValue
+        persistPreferences()
+    }
+    @objc private func preferenceControlChanged() { persistPreferences() }
+    @objc private func profileSelectionChanged() { persistProfileFromControls() }
     @objc private func selectTab(_ sender: SettingsTabButton) { selectTab(at: sender.tag) }
     private func selectTab(at index: Int) { selectedTab = index; updateSelectedTab() }
 
@@ -581,14 +644,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         }
     }
 
-    private func updateSaveButton() {
-        saveButton.isEnabled = !nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !serviceURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !emailField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !passwordField.stringValue.isEmpty
-            && refreshField.doubleValue >= UserPreferences.minimumRefreshInterval
-            && refreshField.doubleValue <= UserPreferences.maximumRefreshInterval
-    }
 }
 
 @MainActor

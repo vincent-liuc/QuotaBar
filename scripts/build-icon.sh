@@ -5,8 +5,6 @@ project_dir="${0:A:h:h}"
 source_svg="$project_dir/Assets/QuotaBarIcon.svg"
 source_png="$project_dir/Assets/AppIcon-1024.png"
 output_icns="$project_dir/Assets/AppIcon.icns"
-mark_svg="$project_dir/Assets/QuotaMark.svg"
-mark_png="$project_dir/Assets/QuotaMark.png"
 iconset_dir="/tmp/dev.ruobin.QuotaBar.iconset"
 
 sips -z 1024 1024 -s format png "$source_svg" --out "$source_png" >/dev/null
@@ -37,5 +35,4 @@ do
 done
 
 iconutil -c icns "$iconset_dir" -o "$output_icns"
-sips -z 256 256 -s format png "$mark_svg" --out "$mark_png" >/dev/null
 echo "$output_icns"

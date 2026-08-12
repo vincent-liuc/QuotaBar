@@ -1,19 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#20252b"/>
-      <stop offset="1" stop-color="#0f1216"/>
+      <stop offset="0" stop-color="#20262c"/>
+      <stop offset="1" stop-color="#101317"/>
     </linearGradient>
-    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#15c98a"/>
-      <stop offset="0.72" stop-color="#21d39a"/>
-      <stop offset="0.72" stop-color="#ffb020"/>
-      <stop offset="1" stop-color="#ffb020"/>
+    <linearGradient id="cat" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#14bd7f"/>
+      <stop offset="1" stop-color="#25d69b"/>
     </linearGradient>
   </defs>
   <rect x="24" y="24" width="976" height="976" rx="220" fill="url(#bg)"/>
-  <circle cx="512" cy="512" r="328" fill="none" stroke="#303841" stroke-width="70"/>
-  <circle cx="512" cy="512" r="328" fill="none" stroke="url(#ring)" stroke-width="70" stroke-linecap="round" stroke-dasharray="1648 413" transform="rotate(-90 512 512)"/>
-  <path d="M595 595l124 124" fill="none" stroke="#f7fafc" stroke-width="70" stroke-linecap="round"/>
-  <circle cx="512" cy="512" r="150" fill="none" stroke="#f7fafc" stroke-width="64" stroke-dasharray="753 189" transform="rotate(-90 512 512)"/>
+  <path fill="url(#cat)" d="M306 493C278 454 280 387 322 337L302 190L423 270C481 251 543 251 601 270L722 190L702 337C744 387 746 454 718 493C669 562 355 562 306 493Z"/>
+  <path fill="url(#cat)" d="M394 522C327 566 295 651 309 797H461L476 667H548L563 797H715C729 651 697 566 630 522C568 547 456 547 394 522Z"/>
+  <ellipse cx="388" cy="801" rx="91" ry="38" fill="#15c98a"/>
+  <ellipse cx="636" cy="801" rx="91" ry="38" fill="#15c98a"/>
+  <path fill="none" stroke="#25d69b" stroke-width="72" stroke-linecap="round" d="M679 704C763 620 809 793 887 683C922 634 904 580 860 568"/>
+  <ellipse cx="420" cy="405" rx="22" ry="32" fill="#101317"/>
+  <ellipse cx="604" cy="405" rx="22" ry="32" fill="#101317"/>
+  <path d="M486 462Q512 484 538 462Q512 522 486 462Z" fill="#101317"/>
+  <path fill="none" stroke="#101317" stroke-width="11" stroke-linecap="round" d="M357 468L254 449M363 489L260 500M667 468L770 449M661 489L764 500"/>
 </svg>

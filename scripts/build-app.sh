@@ -21,7 +21,6 @@ rm -f "$output_zip" "$source_zip"
 mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$binary_path" "$contents_dir/MacOS/QuotaBar"
 cp "$project_dir/Assets/AppIcon.icns" "$contents_dir/Resources/AppIcon.icns"
-cp "$project_dir/Assets/QuotaMark.png" "$contents_dir/Resources/QuotaMark.png"
 
 cat > "$contents_dir/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -45,9 +44,9 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.9.0</string>
+    <string>1.10.0</string>
     <key>CFBundleVersion</key>
-    <string>13</string>
+    <string>14</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>

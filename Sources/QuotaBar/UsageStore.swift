@@ -62,6 +62,49 @@ final class UsageStore {
         return try await client.testConnection(profile: profile.validated(), credentials: credentials)
     }
 
+    func updatePreferences(_ updatedPreferences: UserPreferences) throws {
+        let launchChanged = updatedPreferences.launchAtLogin != preferences.launchAtLogin
+        let intervalChanged = updatedPreferences.refreshInterval != preferences.refreshInterval
+
+        if launchChanged {
+            do {
+                try launchAtLoginManager.setEnabled(updatedPreferences.launchAtLogin)
+                preferencesStore.markLaunchRegistrationCurrent()
+                settingsMessage = launchAtLoginManager.statusDescription
+            } catch {
+                settingsMessage = "开机启动设置失败：\(error.localizedDescription)"
+                onChange?()
+                throw error
+            }
+        }
+        preferencesStore.save(updatedPreferences)
+        preferences = updatedPreferences
+        if intervalChanged { startPolling() }
+        onChange?()
+    }
+
+    func updateProfile(
+        _ profile: StationProfile,
+        credentials: Credentials,
+        makeActive: Bool = true
+    ) async throws {
+        try validate(credentials)
+        let validatedProfile = try profile.validated()
+        try credentialStore.save(credentials, for: validatedProfile.id)
+        if let index = profiles.firstIndex(where: { $0.id == validatedProfile.id }) {
+            profiles[index] = validatedProfile
+        } else {
+            profiles.append(validatedProfile)
+        }
+        if makeActive || activeProfileID == nil { activeProfileID = validatedProfile.id }
+        try persistProfiles()
+        await client.invalidateSession()
+        snapshot = nil
+        phase = .loading
+        onChange?()
+        refreshNow()
+    }
+
     func saveConfiguration(
         profile: StationProfile,
         credentials: Credentials,

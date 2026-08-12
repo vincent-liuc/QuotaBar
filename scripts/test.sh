@@ -11,6 +11,7 @@ swiftc \
   "$project_dir/Sources/QuotaBar/AppPreferences.swift" \
   "$project_dir/Sources/QuotaBar/APIClient.swift" \
   "$project_dir/Sources/QuotaBar/AppUpdater.swift" \
+  "$project_dir/Sources/QuotaBar/StatusRingRenderer.swift" \
   "$project_dir/Tests/SelfTest.swift" \
   -o "$test_binary"
 

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 @main
@@ -12,7 +13,8 @@ enum SelfTest {
         try await testPaginationAndDeduplication()
         try await testOptionalEndpointDegradation()
         testLegacyDefaultsMigration()
-        print("Self-test passed: 9 checks")
+        testStatusCatFill()
+        print("Self-test passed: 10 checks")
     }
 
     private static func testDecodesUsageHistory() throws {
@@ -145,6 +147,37 @@ enum SelfTest {
         require(target.object(forKey: "showMetricCards") != nil && !target.bool(forKey: "showMetricCards"), "legacy boolean preference migrated")
     }
 
+    @MainActor
+    private static func testStatusCatFill() {
+        func bitmap(_ progress: Double) -> NSBitmapImageRep {
+            let image = StatusRingRenderer.image(progress: progress, phase: .ready)
+            return NSBitmapImageRep(data: image.tiffRepresentation!)!
+        }
+
+        func greenPixels(_ bitmap: NSBitmapImageRep, rows: Range<Int>) -> Int {
+            rows.reduce(0) { count, y in
+                count + (0..<bitmap.pixelsWide).filter { x in
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
+                    return color.greenComponent > 0.45
+                        && color.greenComponent > color.redComponent * 1.4
+                        && color.alphaComponent > 0.5
+                }.count
+            }
+        }
+
+        let empty = bitmap(0)
+        let ten = bitmap(0.1)
+        let full = bitmap(1)
+        let split = max(ten.pixelsHigh / 2, 1)
+        require(greenPixels(empty, rows: 0..<empty.pixelsHigh) == 0, "zero usage cat remains black")
+        require(greenPixels(ten, rows: 0..<ten.pixelsHigh) > 0, "ten percent cat has green fill")
+        let tenTop = greenPixels(ten, rows: 0..<split)
+        let tenBottom = greenPixels(ten, rows: split..<ten.pixelsHigh)
+        require(tenBottom > tenTop, "ten percent green fill stays at cat bottom")
+        require(greenPixels(full, rows: 0..<full.pixelsHigh) > greenPixels(ten, rows: 0..<ten.pixelsHigh), "full cat has more green fill")
+        require(empty.colorAt(x: 0, y: 0)?.alphaComponent == 0, "status icon has no outer background")
+    }
+
     private static func testStationProfiles() throws {
         let profile = try StationProfile(
             name: " Proxy ",
@@ -179,15 +212,15 @@ enum SelfTest {
         require(SemanticVersion("v2.0")! == SemanticVersion("2.0.0")!, "semantic version normalization")
 
         let release = GitHubRelease(
-            tagName: "v1.9.0",
-            htmlURL: URL(string: "https://github.com/vincent-liuc/QuotaBar/releases/tag/v1.9.0")!,
+            tagName: "v1.10.0",
+            htmlURL: URL(string: "https://github.com/vincent-liuc/QuotaBar/releases/tag/v1.10.0")!,
             assets: [
                 .init(
-                    name: "QuotaBar-1.9.0-universal.dmg",
+                    name: "QuotaBar-1.10.0-universal.dmg",
                     browserDownloadURL: URL(string: "https://example.com/app.dmg")!
                 ),
                 .init(
-                    name: "QuotaBar-1.9.0-universal.dmg.sha256",
+                    name: "QuotaBar-1.10.0-universal.dmg.sha256",
                     browserDownloadURL: URL(string: "https://example.com/app.dmg.sha256")!
                 )
             ]
@@ -198,15 +231,15 @@ enum SelfTest {
         ) else {
             fatalError("Self-test failed: update release available")
         }
-        require(update.version == "1.9.0", "update version normalized")
+        require(update.version == "1.10.0", "update version normalized")
         require(update.fileName.hasSuffix("universal.dmg"), "universal DMG selected")
         guard case .upToDate(let latest) = try ReleaseResolver.resolve(
             release,
-            currentVersion: "1.9.0"
+            currentVersion: "1.10.0"
         ) else {
             fatalError("Self-test failed: up-to-date release")
         }
-        require(latest == "1.9.0", "latest version reported")
+        require(latest == "1.10.0", "latest version reported")
     }
 
     private static func testPaginationAndDeduplication() async throws {
