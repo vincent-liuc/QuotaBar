@@ -220,7 +220,7 @@ private final class UsageContentView: NSView {
             tint: .systemIndigo
         )
         let cost = metricCard(
-            title: "消费金额",
+            title: "累计消费",
             value: currency(metrics.totalActualCost),
             symbolName: "dollarsign.circle.fill",
             tint: .systemGreen
@@ -508,7 +508,7 @@ private final class HairlineSeparatorView: NSView {
         path.move(to: NSPoint(x: bounds.minX, y: bounds.midY))
         path.line(to: NSPoint(x: bounds.maxX, y: bounds.midY))
         path.lineWidth = lineWidth
-        NSColor.separatorColor.withAlphaComponent(0.20).setStroke()
+        NSColor.separatorColor.withAlphaComponent(0.16).setStroke()
         path.stroke()
     }
 

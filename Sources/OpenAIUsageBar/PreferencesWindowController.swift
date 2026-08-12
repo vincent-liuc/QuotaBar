@@ -7,7 +7,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate {
     init(store: UsageStore) {
         preferencesController = PreferencesViewController(store: store)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 390),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 440),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -42,19 +42,22 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     var onSaved: (() -> Void)?
 
     private let store: UsageStore
+    private let updater = AppUpdater()
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let refreshField = NSTextField()
     private let refreshStepper = NSStepper()
-    private let launchAtLoginSwitch = NSButton()
-    private let showAPIKeyDetailsSwitch = NSButton()
-    private let showMetricCardsSwitch = NSButton()
-    private let launchStatusLabel = settingsLabel("", size: 11, color: .secondaryLabelColor)
+    private let launchAtLoginSwitch = NSSwitch()
+    private let showAPIKeyDetailsSwitch = NSSwitch()
+    private let showMetricCardsSwitch = NSSwitch()
     private let messageLabel = settingsLabel("", size: 11, color: .systemRed)
+    private let updateStatusLabel = settingsLabel("尚未检查", size: 11, color: .secondaryLabelColor)
+    private let updateButton = NSButton(title: "检查更新", target: nil, action: nil)
     private let saveButton = NSButton(title: "保存", target: nil, action: nil)
-    private let tabSelector = NSSegmentedControl()
     private let tabContainer = NSView()
+    private var tabButtons: [SettingsTabButton] = []
     private var tabViews: [NSView] = []
+    private var selectedTab = 0
 
     init(store: UsageStore) {
         self.store = store
@@ -70,12 +73,11 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
         let root = NSView()
         root.translatesAutoresizingMaskIntoConstraints = false
-
         let header = makeTabHeader()
-        let headerDivider = settingsSeparator()
         let body = makeTabBody()
-        let footerDivider = settingsSeparator()
         let footer = makeFooter()
+        let headerDivider = settingsSeparator()
+        let footerDivider = settingsSeparator()
 
         [header, headerDivider, body, footerDivider, footer].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
@@ -83,31 +85,26 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         }
 
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: 460),
-            root.heightAnchor.constraint(equalToConstant: 390),
-
+            root.widthAnchor.constraint(equalToConstant: 520),
+            root.heightAnchor.constraint(equalToConstant: 440),
             header.topAnchor.constraint(equalTo: root.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 74),
-
+            header.heightAnchor.constraint(equalToConstant: 88),
             headerDivider.topAnchor.constraint(equalTo: header.bottomAnchor),
             headerDivider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             headerDivider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-
             body.topAnchor.constraint(equalTo: headerDivider.bottomAnchor),
             body.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             body.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-
             footerDivider.topAnchor.constraint(equalTo: body.bottomAnchor),
             footerDivider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             footerDivider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-
             footer.topAnchor.constraint(equalTo: footerDivider.bottomAnchor),
             footer.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             footer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            footer.heightAnchor.constraint(equalToConstant: 64)
+            footer.heightAnchor.constraint(equalToConstant: 60)
         ])
 
         view = root
@@ -125,10 +122,12 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
         configureTextField(emailField, placeholder: "name@example.com")
         configureTextField(passwordField, placeholder: "输入接口密码")
-        configureTextField(refreshField, placeholder: "10")
+        refreshField.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         refreshField.alignment = .right
-        refreshField.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        refreshField.isBezeled = false
+        refreshField.drawsBackground = false
         refreshField.formatter = settingsRefreshFormatter
+        refreshField.widthAnchor.constraint(equalToConstant: 42).isActive = true
 
         refreshStepper.minValue = UserPreferences.minimumRefreshInterval
         refreshStepper.maxValue = UserPreferences.maximumRefreshInterval
@@ -136,17 +135,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         refreshStepper.integerValue = refreshField.integerValue
         refreshStepper.target = self
         refreshStepper.action = #selector(stepRefreshInterval)
-
-        launchAtLoginSwitch.setButtonType(.switch)
-        launchAtLoginSwitch.title = ""
-        launchAtLoginSwitch.font = NSFont.systemFont(ofSize: 12)
-        showAPIKeyDetailsSwitch.setButtonType(.switch)
-        showAPIKeyDetailsSwitch.title = ""
-        showAPIKeyDetailsSwitch.font = NSFont.systemFont(ofSize: 12)
-        showMetricCardsSwitch.setButtonType(.switch)
-        showMetricCardsSwitch.title = ""
-        showMetricCardsSwitch.font = NSFont.systemFont(ofSize: 12)
-        launchStatusLabel.stringValue = store.launchAtLoginStatus
 
         emailField.delegate = self
         passwordField.delegate = self
@@ -157,38 +145,44 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         saveButton.keyEquivalent = "\r"
         saveButton.bezelStyle = .rounded
 
-        tabSelector.segmentCount = 3
-        tabSelector.trackingMode = .selectOne
-        tabSelector.segmentStyle = .texturedSquare
-        tabSelector.setLabel("账户", forSegment: 0)
-        tabSelector.setImage(settingsSymbol("person.crop.circle", pointSize: 17), forSegment: 0)
-        tabSelector.setLabel("通用", forSegment: 1)
-        tabSelector.setImage(settingsSymbol("gearshape", pointSize: 17), forSegment: 1)
-        tabSelector.setLabel("显示", forSegment: 2)
-        tabSelector.setImage(settingsSymbol("rectangle.3.group", pointSize: 17), forSegment: 2)
-        for segment in 0..<tabSelector.segmentCount {
-            tabSelector.setWidth(92, forSegment: segment)
-        }
-        tabSelector.selectedSegment = 0
-        tabSelector.target = self
-        tabSelector.action = #selector(changeTab)
+        updateButton.target = self
+        updateButton.action = #selector(checkForUpdates)
+        updateButton.bezelStyle = .rounded
+        updateButton.controlSize = .regular
     }
 
     private func makeTabHeader() -> NSView {
-        let stack = NSStackView(views: [tabSelector])
+        let tabs: [(String, String)] = [
+            ("账户", "person.crop.circle"),
+            ("通用", "gearshape"),
+            ("显示", "rectangle.3.group"),
+            ("更新", "arrow.triangle.2.circlepath")
+        ]
+        tabButtons = tabs.enumerated().map { index, item in
+            let button = SettingsTabButton(title: item.0, symbolName: item.1)
+            button.tag = index
+            button.target = self
+            button.action = #selector(selectTab(_:))
+            return button
+        }
+
+        let stack = NSStackView(views: tabButtons)
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.distribution = .gravityAreas
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 16, bottom: 10, right: 16)
-        return stack
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let header = NSView()
+        header.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: header.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: header.centerYAnchor)
+        ])
+        updateSelectedTab()
+        return header
     }
 
     private func makeTabBody() -> NSView {
-        let account = makeAccountTab()
-        let general = makeGeneralTab()
-        let display = makeDisplayTab()
-        tabViews = [account, general, display]
-        tabContainer.translatesAutoresizingMaskIntoConstraints = false
+        tabViews = [makeAccountTab(), makeGeneralTab(), makeDisplayTab(), makeUpdateTab()]
         for tab in tabViews {
             tab.translatesAutoresizingMaskIntoConstraints = false
             tabContainer.addSubview(tab)
@@ -204,94 +198,126 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func makeAccountTab() -> NSView {
-        let accountTitle = settingsLabel("账号", size: 12, weight: .semibold)
-        let accountGrid = NSGridView(views: [
-            [settingsLabel("接口账号", size: 12), emailField],
-            [settingsLabel("密码", size: 12), passwordField]
+        messageLabel.maximumNumberOfLines = 2
+        messageLabel.lineBreakMode = .byWordWrapping
+        messageLabel.isHidden = true
+        return tabStack([
+            sectionTitle("账户"),
+            settingsPanel([
+                fieldRow(title: "接口账号", field: emailField),
+                fieldRow(title: "密码", field: passwordField)
+            ]),
+            messageLabel
         ])
-        configureGrid(accountGrid)
-        accountGrid.widthAnchor.constraint(equalToConstant: 384).isActive = true
-        return tabStack([accountTitle, settingsPanel(accountGrid), messageLabel])
     }
 
     private func makeGeneralTab() -> NSView {
-        let launchTitle = settingsLabel("启动", size: 12, weight: .semibold)
-        let launchRow = settingsRow(title: "登录时自动启动", control: launchAtLoginSwitch)
-
-        let refreshTitle = settingsLabel("刷新", size: 12, weight: .semibold)
         let refreshControls = NSStackView(views: [
             refreshField,
-            refreshStepper,
-            settingsLabel("秒", size: 12),
-            settingsLabel("5–3600", size: 10, color: .tertiaryLabelColor)
+            settingsLabel("秒", size: 13),
+            refreshStepper
         ])
         refreshControls.orientation = .horizontal
         refreshControls.alignment = .centerY
         refreshControls.spacing = 7
-        refreshField.widthAnchor.constraint(equalToConstant: 72).isActive = true
-        let refreshRow = settingsRow(title: "更新间隔", control: refreshControls)
-
-        let status = settingsLabel(store.launchAtLoginStatus, size: 10, color: .secondaryLabelColor)
         return tabStack([
-            launchTitle,
-            settingsPanel(launchRow),
-            status,
-            refreshTitle,
-            settingsPanel(refreshRow)
+            sectionTitle("启动"),
+            settingsPanel([
+                settingsRow(title: "登录时自动启动", control: launchAtLoginSwitch)
+            ]),
+            sectionTitle("监控"),
+            settingsPanel([
+                settingsRow(title: "更新间隔", control: refreshControls)
+            ])
         ])
     }
 
     private func makeDisplayTab() -> NSView {
-        let title = settingsLabel("Dashboard 内容", size: 12, weight: .semibold)
-        let metrics = settingsRow(title: "累计指标", control: showMetricCardsSwitch)
-        let keys = settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch)
-        let rows = NSStackView(views: [metrics, settingsSeparator(), keys])
-        rows.orientation = .vertical
-        rows.alignment = .leading
-        rows.spacing = 0
-        rows.widthAnchor.constraint(equalToConstant: 384).isActive = true
-        rows.arrangedSubviews[1].widthAnchor.constraint(equalToConstant: 380).isActive = true
-        return tabStack([title, settingsPanel(rows)])
+        return tabStack([
+            sectionTitle("Dashboard 内容"),
+            settingsPanel([
+                settingsRow(title: "累计指标", control: showMetricCardsSwitch),
+                settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch)
+            ])
+        ])
+    }
+
+    private func makeUpdateTab() -> NSView {
+        let version = settingsLabel("\(AppVersionInfo.version) (\(AppVersionInfo.build))", size: 12,
+                                    color: .secondaryLabelColor)
+        return tabStack([
+            sectionTitle("软件更新"),
+            settingsPanel([
+                settingsRow(title: "当前版本", control: version),
+                settingsRow(title: "版本更新", control: updateButton)
+            ]),
+            updateStatusLabel
+        ])
     }
 
     private func tabStack(_ views: [NSView]) -> NSView {
-        messageLabel.maximumNumberOfLines = 2
-        messageLabel.lineBreakMode = .byWordWrapping
-        messageLabel.isHidden = true
-        let stack = NSStackView(views: views)
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        let stack = NSStackView(views: views + [spacer])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 18, right: 24)
+        stack.edgeInsets = NSEdgeInsets(top: 22, left: 32, bottom: 20, right: 32)
+        for view in views {
+            view.setContentHuggingPriority(.required, for: .vertical)
+            view.setContentCompressionResistancePriority(.required, for: .vertical)
+        }
         return stack
     }
 
-    private func settingsPanel(_ content: NSView) -> NSView {
+    private func sectionTitle(_ title: String) -> NSTextField {
+        settingsLabel(title, size: 13, weight: .semibold)
+    }
+
+    private func settingsPanel(_ rows: [NSView]) -> NSView {
+        var arranged: [NSView] = []
+        for (index, row) in rows.enumerated() {
+            if index > 0 { arranged.append(settingsSeparator()) }
+            arranged.append(row)
+        }
+
+        let stack = NSStackView(views: arranged)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
         let panel = NSView()
         panel.wantsLayer = true
         panel.layer?.cornerRadius = 10
-        panel.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.55).cgColor
-        content.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(content)
+        panel.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.58).cgColor
+        panel.addSubview(stack)
         NSLayoutConstraint.activate([
-            panel.widthAnchor.constraint(equalToConstant: 412),
-            content.topAnchor.constraint(equalTo: panel.topAnchor, constant: 12),
-            content.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 14),
-            content.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -14),
-            content.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -12)
+            panel.widthAnchor.constraint(equalToConstant: 456),
+            stack.topAnchor.constraint(equalTo: panel.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -14),
+            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor)
         ])
+        for view in stack.arrangedSubviews where view is NSBox {
+            view.widthAnchor.constraint(equalToConstant: 428).isActive = true
+        }
         return panel
     }
 
     private func settingsRow(title: String, control: NSView) -> NSView {
-        let titleLabel = settingsLabel(title, size: 12)
+        let titleLabel = settingsLabel(title, size: 13, weight: .medium)
         let spacer = NSView()
         let row = NSStackView(views: [titleLabel, spacer, control])
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.widthAnchor.constraint(equalToConstant: 384).isActive = true
-        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 28).isActive = true
+        row.widthAnchor.constraint(equalToConstant: 428).isActive = true
+        row.heightAnchor.constraint(equalToConstant: 52).isActive = true
         return row
+    }
+
+    private func fieldRow(title: String, field: NSTextField) -> NSView {
+        field.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        return settingsRow(title: title, control: field)
     }
 
     private func makeFooter() -> NSView {
@@ -301,24 +327,12 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         let spacer = NSView()
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded
-
         let stack = NSStackView(views: [lockIcon, note, spacer, cancel, saveButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 14, left: 24, bottom: 14, right: 24)
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: 24, bottom: 12, right: 24)
         return stack
-    }
-
-    private func configureGrid(_ grid: NSGridView) {
-        grid.rowSpacing = 10
-        grid.columnSpacing = 14
-        grid.column(at: 0).width = 76
-        grid.column(at: 0).xPlacement = .trailing
-        grid.column(at: 1).xPlacement = .fill
-        for rowIndex in 0..<grid.numberOfRows {
-            grid.row(at: rowIndex).yPlacement = .center
-        }
     }
 
     private func configureTextField(_ field: NSTextField, placeholder: String) {
@@ -344,7 +358,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         saveButton.isEnabled = false
         messageLabel.stringValue = ""
         messageLabel.isHidden = true
-
         Task {
             do {
                 try await store.savePreferences(
@@ -360,6 +373,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
                 messageLabel.stringValue = store.settingsMessage ?? error.localizedDescription
                 messageLabel.isHidden = false
                 saveButton.isEnabled = true
+                selectTab(at: 0)
             }
         }
     }
@@ -373,13 +387,46 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         updateSaveButton()
     }
 
-    @objc private func changeTab() {
+    @objc private func selectTab(_ sender: SettingsTabButton) {
+        selectTab(at: sender.tag)
+    }
+
+    private func selectTab(at index: Int) {
+        selectedTab = index
         updateSelectedTab()
     }
 
     private func updateSelectedTab() {
+        for (index, button) in tabButtons.enumerated() {
+            button.isSelectedTab = index == selectedTab
+        }
         for (index, tab) in tabViews.enumerated() {
-            tab.isHidden = index != tabSelector.selectedSegment
+            tab.isHidden = index != selectedTab
+        }
+    }
+
+    @objc private func checkForUpdates() {
+        updateButton.isEnabled = false
+        updateButton.title = "检查中…"
+        updateStatusLabel.stringValue = "正在检查"
+        Task {
+            do {
+                let result = try await updater.checkForUpdate(currentVersion: AppVersionInfo.version)
+                switch result {
+                case .upToDate(let latestVersion):
+                    updateStatusLabel.stringValue = "已是最新版本 \(latestVersion)"
+                case .available(let release):
+                    updateButton.title = "下载中…"
+                    updateStatusLabel.stringValue = "正在下载 \(release.version)"
+                    let fileURL = try await updater.download(release)
+                    updateStatusLabel.stringValue = "已下载 \(release.version)"
+                    NSWorkspace.shared.open(fileURL)
+                }
+            } catch {
+                updateStatusLabel.stringValue = error.localizedDescription
+            }
+            updateButton.title = "检查更新"
+            updateButton.isEnabled = true
         }
     }
 
@@ -388,6 +435,58 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             && !passwordField.stringValue.isEmpty
             && refreshField.doubleValue >= UserPreferences.minimumRefreshInterval
             && refreshField.doubleValue <= UserPreferences.maximumRefreshInterval
+    }
+}
+
+@MainActor
+private final class SettingsTabButton: NSButton {
+    var isSelectedTab = false {
+        didSet { updateAppearance() }
+    }
+
+    init(title: String, symbolName: String) {
+        super.init(frame: .zero)
+        self.title = title
+        image = settingsSymbol(symbolName, pointSize: 19)
+        imagePosition = .imageAbove
+        imageScaling = .scaleProportionallyDown
+        alignment = .center
+        isBordered = false
+        setButtonType(.momentaryPushIn)
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 82),
+            heightAnchor.constraint(equalToConstant: 62)
+        ])
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        let color: NSColor = isSelectedTab ? .controlAccentColor : .secondaryLabelColor
+        contentTintColor = color
+        attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: isSelectedTab ? .semibold : .regular),
+                .foregroundColor: color
+            ]
+        )
+        layer?.backgroundColor = isSelectedTab
+            ? NSColor.controlAccentColor.withAlphaComponent(0.10).cgColor
+            : NSColor.clear.cgColor
+        layer?.borderWidth = isSelectedTab ? 0.5 : 0
+        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
     }
 }
 
@@ -418,6 +517,7 @@ private func settingsLabel(
 private func settingsSeparator() -> NSBox {
     let separator = NSBox()
     separator.boxType = .separator
+    separator.alphaValue = 0.45
     return separator
 }
 

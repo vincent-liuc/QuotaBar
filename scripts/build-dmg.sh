@@ -59,4 +59,10 @@ test -f "$mount_point/安装说明.txt"
 hdiutil detach "$mount_point" -quiet
 mount_point=""
 
+(
+  cd "$project_dir/outputs"
+  shasum -a 256 "${output_dmg:t}" > "${output_dmg:t}.sha256"
+)
+
 echo "$output_dmg"
+echo "$output_dmg.sha256"

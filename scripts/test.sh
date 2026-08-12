@@ -9,6 +9,7 @@ swiftc \
   "$project_dir/Sources/OpenAIUsageBar/Models.swift" \
   "$project_dir/Sources/OpenAIUsageBar/AppPreferences.swift" \
   "$project_dir/Sources/OpenAIUsageBar/APIClient.swift" \
+  "$project_dir/Sources/OpenAIUsageBar/AppUpdater.swift" \
   "$project_dir/Tests/SelfTest.swift" \
   -o "$test_binary"
 

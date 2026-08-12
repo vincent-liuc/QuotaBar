@@ -6,8 +6,9 @@ enum SelfTest {
         try testDecodesUsageResponse()
         testWeeklyUsageAndProgress()
         testPreferenceNormalization()
+        try testReleaseResolution()
         try await testPaginationAndDeduplication()
-        print("Self-test passed: 4 checks")
+        print("Self-test passed: 5 checks")
     }
 
     private static func testDecodesUsageResponse() throws {
@@ -102,6 +103,41 @@ enum SelfTest {
         require(initial.showMetricCards, "metric cards default enabled")
         store.save(preferences)
         require(store.load() == preferences, "display preferences persisted")
+    }
+
+    private static func testReleaseResolution() throws {
+        require(SemanticVersion("1.7.0")! > SemanticVersion("1.6.9")!, "semantic version ordering")
+        require(SemanticVersion("v2.0")! == SemanticVersion("2.0.0")!, "semantic version normalization")
+
+        let release = GitHubRelease(
+            tagName: "v1.8.0",
+            htmlURL: URL(string: "https://github.com/vincent-liuc/openai-usage/releases/tag/v1.8.0")!,
+            assets: [
+                .init(
+                    name: "OpenAI用量-1.8.0-universal.dmg",
+                    browserDownloadURL: URL(string: "https://example.com/app.dmg")!
+                ),
+                .init(
+                    name: "OpenAI用量-1.8.0-universal.dmg.sha256",
+                    browserDownloadURL: URL(string: "https://example.com/app.dmg.sha256")!
+                )
+            ]
+        )
+        guard case .available(let update) = try ReleaseResolver.resolve(
+            release,
+            currentVersion: "1.7.0"
+        ) else {
+            fatalError("Self-test failed: update release available")
+        }
+        require(update.version == "1.8.0", "update version normalized")
+        require(update.fileName.hasSuffix("universal.dmg"), "universal DMG selected")
+        guard case .upToDate(let latest) = try ReleaseResolver.resolve(
+            release,
+            currentVersion: "1.8.0"
+        ) else {
+            fatalError("Self-test failed: up-to-date release")
+        }
+        require(latest == "1.8.0", "latest version reported")
     }
 
     private static func testPaginationAndDeduplication() async throws {
