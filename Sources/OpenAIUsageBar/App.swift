@@ -75,7 +75,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func refreshUI() {
         statusItem.button?.image = StatusRingRenderer.image(
-            progress: store.snapshot?.progress,
+            progress: store.snapshot.flatMap { $0.hasWeeklyUsage ? $0.progress : nil },
             phase: store.phase
         )
         statusItem.button?.setAccessibilityLabel(accessibilityLabel)
@@ -95,8 +95,12 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard let snapshot = store.snapshot else {
             return "OpenAI 用量尚不可用"
         }
+        let station = store.activeProfile?.name ?? "当前站点"
+        guard snapshot.hasWeeklyUsage else {
+            return "\(station)周订阅额度不可用，共 \(snapshot.keys.count) 个 API Key"
+        }
         let used = String(format: "$%.2f", snapshot.used)
         let total = String(format: "$%.2f", snapshot.total)
-        return "OpenAI 本周用量 \(used)，每周总量 \(total)，已使用 \(Int((snapshot.progress * 100).rounded()))%，共 \(snapshot.keys.count) 个 API Key"
+        return "\(station)本周用量 \(used)，每周总量 \(total)，已使用 \(Int((snapshot.progress * 100).rounded()))%，共 \(snapshot.keys.count) 个 API Key"
     }
 }

@@ -200,11 +200,15 @@ private final class UsageContentView: NSView {
         sections.alignment = .leading
         sections.spacing = 0
 
-        if preferences.showMetricCards {
-            sections.addArrangedSubview(makeMetricCards(snapshot.accountMetrics))
+        if preferences.showMetricCards, let accountMetrics = snapshot.accountMetrics {
+            sections.addArrangedSubview(makeMetricCards(accountMetrics))
             sections.addArrangedSubview(sectionSeparator())
         }
-        sections.addArrangedSubview(makeUsageRow(snapshot))
+        if snapshot.hasWeeklyUsage {
+            sections.addArrangedSubview(makeUsageRow(snapshot))
+        } else {
+            sections.addArrangedSubview(unavailableRow("当前站点没有可用的周订阅额度"))
+        }
         if preferences.showAPIKeyDetails {
             sections.addArrangedSubview(sectionSeparator())
             sections.addArrangedSubview(makeKeyDetails(snapshot.keys))
@@ -321,7 +325,8 @@ private final class UsageContentView: NSView {
         }
         let name = label(key.name, size: 11, weight: .medium)
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let value = label("今日 \(currency(key.todayActualCost))",
+        let todayValue = key.todayActualCost.map(currency) ?? "--"
+        let value = label("今日 \(todayValue)",
                           size: 11,
                           color: .secondaryLabelColor)
         value.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
@@ -338,6 +343,14 @@ private final class UsageContentView: NSView {
             top.heightAnchor.constraint(equalToConstant: 27)
         ])
         return top
+    }
+
+    private func unavailableRow(_ message: String) -> NSView {
+        let text = label(message, size: 11, color: .secondaryLabelColor)
+        text.alignment = .center
+        text.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        text.heightAnchor.constraint(equalToConstant: 54).isActive = true
+        return text
     }
 
     private func panel(_ content: NSView) -> NSView {

@@ -15,9 +15,17 @@ enum KeychainError: LocalizedError {
 
 final class CredentialStore: @unchecked Sendable {
     private let service = "dev.ruobin.OpenAIUsageBar"
-    private let account = "api-credentials"
+    private let legacyAccount = "api-credentials"
 
-    func load() throws -> Credentials? {
+    func load(for profileID: UUID) throws -> Credentials? {
+        try load(account: account(for: profileID))
+    }
+
+    func loadLegacy() throws -> Credentials? {
+        try load(account: legacyAccount)
+    }
+
+    private func load(account: String) throws -> Credentials? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -35,7 +43,11 @@ final class CredentialStore: @unchecked Sendable {
         return try JSONDecoder().decode(StoredCredentials.self, from: data).credentials
     }
 
-    func save(_ credentials: Credentials) throws {
+    func save(_ credentials: Credentials, for profileID: UUID) throws {
+        try save(credentials, account: account(for: profileID))
+    }
+
+    private func save(_ credentials: Credentials, account: String) throws {
         let data = try JSONEncoder().encode(StoredCredentials(credentials))
         let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -58,6 +70,29 @@ final class CredentialStore: @unchecked Sendable {
         } else if updateStatus != errSecSuccess {
             throw KeychainError.unexpectedStatus(updateStatus)
         }
+    }
+
+    func delete(for profileID: UUID) throws {
+        try delete(account: account(for: profileID))
+    }
+
+    func deleteLegacy() throws {
+        try delete(account: legacyAccount)
+    }
+
+    private func delete(account: String) throws {
+        let status = SecItemDelete([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ] as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    private func account(for profileID: UUID) -> String {
+        "station-\(profileID.uuidString.lowercased())"
     }
 }
 

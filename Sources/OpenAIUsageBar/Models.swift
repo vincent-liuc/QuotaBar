@@ -77,13 +77,15 @@ struct SubscriptionGroup: Decodable, Sendable {
 }
 
 struct SubscriptionRecord: Decodable, Sendable {
+    let id: Int?
     let status: String
+    let name: String?
     let weeklyUsageUSD: Double?
     let directWeeklyLimitUSD: Double?
     let group: SubscriptionGroup?
 
     enum CodingKeys: String, CodingKey {
-        case status, group
+        case id, status, group, name
         case weeklyUsageUSD = "weekly_usage_usd"
         case directWeeklyLimitUSD = "weekly_limit_usd"
     }
@@ -102,9 +104,10 @@ struct AccountMetrics: Equatable, Sendable {
 }
 
 struct UsageData: Equatable, Sendable {
-    let weeklyUsage: WeeklyUsage
-    let accountMetrics: AccountMetrics
+    let weeklyUsage: WeeklyUsage?
+    let accountMetrics: AccountMetrics?
     let keys: [UsageKey]
+    let capabilities: Set<StationCapability>
 }
 
 struct UsageKey: Decodable, Equatable, Sendable {
@@ -115,7 +118,7 @@ struct UsageKey: Decodable, Equatable, Sendable {
     let quotaUsed: Double
     let updatedAt: Date?
     var currentConcurrency: Int? = nil
-    var todayActualCost: Double = 0
+    var todayActualCost: Double? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, quota
@@ -137,9 +140,10 @@ struct UsageKey: Decodable, Equatable, Sendable {
 
 struct UsageSnapshot: Equatable, Sendable {
     let keys: [UsageKey]
+    let weeklyUsage: WeeklyUsage?
     let used: Double
     let total: Double
-    let accountMetrics: AccountMetrics
+    let accountMetrics: AccountMetrics?
     let fetchedAt: Date
 
     var serverUpdatedAt: Date? { keys.compactMap(\.updatedAt).max() }
@@ -154,22 +158,25 @@ struct UsageSnapshot: Equatable, Sendable {
     var isOverQuota: Bool { total > 0 && used > total }
 
     init(
-        weeklyUsage: WeeklyUsage,
-        accountMetrics: AccountMetrics = AccountMetrics(totalTokens: 0, totalActualCost: 0),
+        weeklyUsage: WeeklyUsage?,
+        accountMetrics: AccountMetrics? = nil,
         keys: [UsageKey],
         fetchedAt: Date = Date()
     ) {
         self.keys = keys.filter(\.isActive).sorted { lhs, rhs in
-            if lhs.todayActualCost != rhs.todayActualCost {
-                return lhs.todayActualCost > rhs.todayActualCost
+            if (lhs.todayActualCost ?? -1) != (rhs.todayActualCost ?? -1) {
+                return (lhs.todayActualCost ?? -1) > (rhs.todayActualCost ?? -1)
             }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
-        used = weeklyUsage.used
-        total = weeklyUsage.total
+        self.weeklyUsage = weeklyUsage
+        used = weeklyUsage?.used ?? 0
+        total = weeklyUsage?.total ?? 0
         self.accountMetrics = accountMetrics
         self.fetchedAt = fetchedAt
     }
+
+    var hasWeeklyUsage: Bool { weeklyUsage != nil }
 }
 
 struct Credentials: Equatable, Sendable {

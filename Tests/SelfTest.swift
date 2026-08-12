@@ -6,9 +6,11 @@ enum SelfTest {
         try testDecodesUsageResponse()
         testWeeklyUsageAndProgress()
         testPreferenceNormalization()
+        try testStationProfiles()
         try testReleaseResolution()
         try await testPaginationAndDeduplication()
-        print("Self-test passed: 5 checks")
+        try await testOptionalEndpointDegradation()
+        print("Self-test passed: 7 checks")
     }
 
     private static func testDecodesUsageResponse() throws {
@@ -45,7 +47,7 @@ enum SelfTest {
         require(result.data.page == 1, "page")
         require(result.data.pageSize == 100, "page_size")
         require(result.data.pages == 1, "pages")
-        require(result.data.items.first?.todayActualCost == 0, "today cost defaults to zero")
+        require(result.data.items.first?.todayActualCost == nil, "today cost is unavailable before usage lookup")
     }
 
     private static func testWeeklyUsageAndProgress() {
@@ -76,6 +78,8 @@ enum SelfTest {
         require(over.remaining == 0, "remaining lower bound")
         require(over.isOverQuota, "over-quota flag")
         require(invalid.progress == 0, "zero-quota progress")
+        let unavailable = UsageSnapshot(weeklyUsage: nil, keys: keys)
+        require(!unavailable.hasWeeklyUsage, "missing weekly usage remains unavailable")
     }
 
     private static func testPreferenceNormalization() {
@@ -103,6 +107,29 @@ enum SelfTest {
         require(initial.showMetricCards, "metric cards default enabled")
         store.save(preferences)
         require(store.load() == preferences, "display preferences persisted")
+    }
+
+    private static func testStationProfiles() throws {
+        let profile = try StationProfile(
+            name: " Proxy ",
+            serviceURL: "https://relay.example.com/panel/",
+            apiPath: "api/v1/",
+            timezone: "Asia/Shanghai"
+        ).validated()
+        require(profile.name == "Proxy", "station name normalized")
+        require(profile.serviceURL == "https://relay.example.com/panel", "service URL normalized")
+        require(profile.apiPath == "/api/v1", "API path normalized")
+        require(profile.apiBaseURL?.absoluteString == "https://relay.example.com/panel/api/v1", "path prefix preserved")
+        require((try? StationProfile(name: "HTTP", serviceURL: "http://example.com").validated()) == nil, "HTTP rejected")
+        require((try? StationProfile(name: "Secret", serviceURL: "https://user:pass@example.com").validated()) == nil, "URL credentials rejected")
+
+        let suiteName = "dev.ruobin.OpenAIUsageBar.StationSelfTest.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let profileStore = StationProfileStore(defaults: defaults)
+        try profileStore.save(StationProfilesState(profiles: [profile], activeProfileID: profile.id))
+        require(profileStore.load().profiles == [profile], "station profiles persisted")
+        require(profileStore.load().activeProfileID == profile.id, "active profile persisted")
     }
 
     private static func testReleaseResolution() throws {
@@ -145,13 +172,13 @@ enum SelfTest {
         let requestedUsageIDs = LockedPages()
         MockURLProtocol.requestHandler = { request in
             let url = try requireURL(request)
-            if url.path == "/api/v1/auth/login" {
+            if url.path.hasSuffix("/api/v1/auth/login") {
                 return mockResponse(
                     url: url,
                     json: #"{"code":0,"message":"success","data":{"access_token":"test-token","expires_in":3600,"token_type":"bearer"}}"#
                 )
             }
-            if url.path == "/api/v1/subscriptions" {
+            if url.path.hasSuffix("/api/v1/subscriptions") {
                 let timezone = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                     .queryItems?.first(where: { $0.name == "timezone" })?.value
                 guard timezone == "Asia/Shanghai" else {
@@ -159,16 +186,16 @@ enum SelfTest {
                 }
                 return mockResponse(
                     url: url,
-                    json: #"{"code":0,"message":"success","data":[{"status":"active","weekly_usage_usd":52.71,"group":{"weekly_limit_usd":500}}]}"#
+                    json: #"{"code":0,"message":"success","data":[{"id":10,"name":"Weekly","status":"active","weekly_usage_usd":52.71,"group":{"weekly_limit_usd":500}}]}"#
                 )
             }
-            if url.path == "/api/v1/usage/dashboard/stats" {
+            if url.path.hasSuffix("/api/v1/usage/dashboard/stats") {
                 return mockResponse(
                     url: url,
                     json: #"{"code":0,"message":"success","data":{"total_tokens":137630389,"total_actual_cost":106.38925756}}"#
                 )
             }
-            if url.path == "/api/v1/usage/dashboard/api-keys-usage" {
+            if url.path.hasSuffix("/api/v1/usage/dashboard/api-keys-usage") {
                 guard request.httpMethod == "POST" else {
                     throw APIClientError.invalidResponse
                 }
@@ -213,6 +240,12 @@ enum SelfTest {
         configuration.protocolClasses = [MockURLProtocol.self]
         let client = APIClient(session: URLSession(configuration: configuration))
         let usage = try await client.fetchUsage(
+            profile: StationProfile(
+                name: "Test",
+                serviceURL: "https://relay.example.com/proxy",
+                timezone: "Asia/Shanghai",
+                subscriptionSelection: .manual(10)
+            ),
             credentials: Credentials(email: "test@example.com", password: "test")
         )
 
@@ -222,10 +255,45 @@ enum SelfTest {
         require(usage.keys.first(where: { $0.id == 2 })?.quotaUsed == 25, "duplicate key refreshed")
         require(usage.keys.first(where: { $0.id == 2 })?.todayActualCost == 8.5, "today usage merged by key id")
         require(usage.keys.first(where: { $0.id == 1 })?.concurrency == 2, "current concurrency retained")
-        require(usage.weeklyUsage.used == 52.71, "weekly usage decoded")
-        require(usage.weeklyUsage.total == 500, "nested weekly limit decoded")
-        require(usage.accountMetrics.totalTokens == 137_630_389, "total tokens decoded")
-        require(usage.accountMetrics.totalActualCost == 106.38925756, "total actual cost decoded")
+        require(usage.weeklyUsage?.used == 52.71, "weekly usage decoded")
+        require(usage.weeklyUsage?.total == 500, "nested weekly limit decoded")
+        require(usage.accountMetrics?.totalTokens == 137_630_389, "total tokens decoded")
+        require(usage.accountMetrics?.totalActualCost == 106.38925756, "total actual cost decoded")
+        require(usage.capabilities.contains(.apiKeyDailyUsage), "daily usage capability detected")
+    }
+
+    private static func testOptionalEndpointDegradation() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let url = try requireURL(request)
+            require(url.host == "another.example.com", "dynamic station host used")
+            require(url.path.hasPrefix("/sub/api/v1/"), "reverse proxy prefix used")
+            if url.path.hasSuffix("/auth/login") {
+                return mockResponse(
+                    url: url,
+                    json: #"{"code":0,"message":"success","data":{"access_token":"token"}}"#
+                )
+            }
+            if url.path.hasSuffix("/keys") {
+                return mockResponse(
+                    url: url,
+                    json: #"{"code":0,"message":"success","data":{"items":[{"id":4,"name":"Core","status":"active","quota":10,"quota_used":1}],"total":1,"page":1,"page_size":100,"pages":1}}"#
+                )
+            }
+            return mockResponse(url: url, json: #"{"code":404,"message":"unsupported","data":{}}"#, status: 404)
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let client = APIClient(session: URLSession(configuration: configuration))
+        let usage = try await client.fetchUsage(
+            profile: StationProfile(name: "Old", serviceURL: "https://another.example.com/sub"),
+            credentials: Credentials(email: "old@example.com", password: "password")
+        )
+        require(usage.keys.count == 1, "core keys survive optional endpoint failures")
+        require(usage.weeklyUsage == nil, "missing subscription is unavailable")
+        require(usage.accountMetrics == nil, "missing metrics are unavailable")
+        require(usage.keys[0].todayActualCost == nil, "missing daily usage is not zero")
+        require(usage.capabilities.isEmpty, "unsupported capabilities excluded")
     }
 
     private static func keyPageJSON(page: Int, items: [String]) -> String {
@@ -234,10 +302,10 @@ enum SelfTest {
         """
     }
 
-    private static func mockResponse(url: URL, json: String) -> (HTTPURLResponse, Data) {
+    private static func mockResponse(url: URL, json: String, status: Int = 200) -> (HTTPURLResponse, Data) {
         let response = HTTPURLResponse(
             url: url,
-            statusCode: 200,
+            statusCode: status,
             httpVersion: nil,
             headerFields: ["Content-Type": "application/json"]
         )!

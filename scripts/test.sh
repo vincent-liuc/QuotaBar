@@ -6,6 +6,7 @@ test_binary="/tmp/dev.ruobin.OpenAIUsageBar-self-test"
 
 swiftc \
   -parse-as-library \
+  "$project_dir/Sources/OpenAIUsageBar/StationProfile.swift" \
   "$project_dir/Sources/OpenAIUsageBar/Models.swift" \
   "$project_dir/Sources/OpenAIUsageBar/AppPreferences.swift" \
   "$project_dir/Sources/OpenAIUsageBar/APIClient.swift" \
