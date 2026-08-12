@@ -1,9 +1,9 @@
-# OpenAI用量
+# QuotaBar
 
-一个原生的 macOS 菜单栏用量监控工具。它定时读取指定账号的每周订阅用量和 API Key 用量，并用菜单栏环形图展示整体进度。
+一个原生的 macOS 菜单栏用量监控工具。它可以保存和切换多个 Sub2API 兼容站点，定时读取每周订阅用量、API Key 用量和使用记录，并用菜单栏环形图展示整体进度。
 
 > [!IMPORTANT]
-> 这是第三方开源项目，与 OpenAI, L.L.C. 没有隶属、授权或背书关系。OpenAI 名称及标志属于其各自权利人。
+> 这是第三方开源项目，与 Sub2API 及其部署方没有隶属、授权或背书关系。
 
 ![应用图标](Assets/AppIcon-1024.png)
 
@@ -11,14 +11,15 @@
 
 - 菜单栏环形图展示每周已用额度 / 每周总额度
 - 毛玻璃弹窗展示订阅合计、累计 Token 与累计消费金额
-- 展示每个启用 API Key 的当日用量；有请求运行时同步显示当前并发
+- 展示每个启用 API Key 的当日用量和可选额度进度；有请求运行时同步显示当前并发
 - API Key 按当日实际用量从高到低排列
-- 可在设置中分别隐藏累计指标卡片和 API Key 明细
+- 展示站点时区内最近两天的最新 10 条使用记录
+- 可在设置中分别隐藏累计指标卡片、API Key 明细和使用记录
 - 刷新频率可设置为 5-3600 秒
 - 账号和密码保存在 macOS 钥匙串
 - 支持使用 macOS 原生登录项开机启动
 - 设置内支持检查 GitHub Releases，下载最新 universal DMG，校验 SHA-256 后打开安装镜像
-- 当前版本：1.8.0
+- 当前版本：1.9.0
 - 提供独立偏好设置窗口
 
 ## 数据来源与隐私
@@ -33,10 +34,11 @@
 - `/api/v1/keys`：API Key 名称、启用状态和当前并发
 - `/api/v1/usage/dashboard/stats`：累计 Token 和累计实际消费金额
 - `/api/v1/usage/dashboard/api-keys-usage`：启用 API Key 的当日实际用量
+- `/api/v1/usage`：API Key、模型、推理强度、实际费用和时间
 
 macOS 版本将账号和密码保存在系统钥匙串，不写入源码或 `UserDefaults`；访问令牌仅保存在应用进程内存中。源码没有集成额外的分析或遥测服务。
 
-应用支持保存多个站点、切换当前站点、配置反向代理路径与时区，并在保存前检测接口能力。首版兼容范围是 Sub2API 及其保持接口契约的部署，不承诺兼容 One API、New API 或私有中转系统。累计指标或 API Key 当日用量等可选接口缺失时，对应内容会隐藏或显示 `--`，不会把缺失数据解释为零。
+应用支持保存多个站点、切换当前站点、配置反向代理路径与时区，并在保存前检测接口能力。首版兼容范围是 Sub2API 及其保持接口契约的部署，不承诺兼容 One API、New API 或私有中转系统。累计指标、API Key 当日用量或使用记录等可选接口缺失时，对应内容会隐藏或显示 `--`，不会把缺失数据解释为零。
 
 公开部署或分发前，请自行评估并信任所配置的后端。
 
@@ -61,7 +63,7 @@ zsh scripts/build-dmg.sh
 ## 项目结构
 
 ```text
-Sources/OpenAIUsageBar/   macOS 应用源码
+Sources/QuotaBar/         macOS 应用源码
 Tests/                    macOS 自检
 Assets/                   macOS 图标资源
 scripts/                  macOS 构建与打包脚本
@@ -74,5 +76,3 @@ scripts/                  macOS 构建与打包脚本
 ## 许可证
 
 项目源码采用 [MIT License](LICENSE) 发布。
-
-图标素材的来源与商标限制见 [Third-Party Notices](THIRD_PARTY_NOTICES.md)。

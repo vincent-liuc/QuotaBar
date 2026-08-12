@@ -5,6 +5,7 @@ enum StationCapability: String, Codable, CaseIterable, Sendable {
     case accountMetrics
     case apiKeyDailyUsage
     case concurrency
+    case usageHistory
 }
 
 enum SubscriptionSelection: Codable, Equatable, Sendable {

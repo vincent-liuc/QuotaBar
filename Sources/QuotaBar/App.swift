@@ -1,7 +1,7 @@
 import AppKit
 
 @main
-enum OpenAIUsageBarApp {
+enum QuotaBarApp {
     @MainActor
     static func main() {
         let application = NSApplication.shared
@@ -22,6 +22,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var preferencesController: PreferencesWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppDataMigration.migrateLegacyDefaultsIfNeeded()
         store = UsageStore()
         contentController = UsagePopoverController(store: store) { [weak self] in
             self?.showPreferences()
@@ -34,7 +35,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         button.target = self
         button.action = #selector(togglePopover)
-        button.toolTip = "OpenAI用量"
+        button.toolTip = "QuotaBar"
 
         store.onChange = { [weak self] in
             self?.refreshUI()
@@ -93,7 +94,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private var accessibilityLabel: String {
         guard let snapshot = store.snapshot else {
-            return "OpenAI 用量尚不可用"
+            return "QuotaBar 用量尚不可用"
         }
         let station = store.activeProfile?.name ?? "当前站点"
         guard snapshot.hasWeeklyUsage else {

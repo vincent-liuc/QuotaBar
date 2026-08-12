@@ -140,7 +140,11 @@ private final class UsageContentView: NSView {
         ])
 
         if let snapshot = store.snapshot {
-            content.addArrangedSubview(makeDashboardPanel(snapshot, preferences: store.preferences))
+            content.addArrangedSubview(makeDashboardPanel(
+                snapshot,
+                preferences: store.preferences,
+                timezone: store.activeProfile?.timezone ?? TimeZone.current.identifier
+            ))
         } else if store.phase == .loading {
             content.addArrangedSubview(makeLoadingView())
         }
@@ -194,7 +198,11 @@ private final class UsageContentView: NSView {
         return row
     }
 
-    private func makeDashboardPanel(_ snapshot: UsageSnapshot, preferences: UserPreferences) -> NSView {
+    private func makeDashboardPanel(
+        _ snapshot: UsageSnapshot,
+        preferences: UserPreferences,
+        timezone: String
+    ) -> NSView {
         let sections = NSStackView()
         sections.orientation = .vertical
         sections.alignment = .leading
@@ -212,6 +220,10 @@ private final class UsageContentView: NSView {
         if preferences.showAPIKeyDetails {
             sections.addArrangedSubview(sectionSeparator())
             sections.addArrangedSubview(makeKeyDetails(snapshot.keys))
+        }
+        if preferences.showUsageHistory, let records = snapshot.usageRecords {
+            sections.addArrangedSubview(sectionSeparator())
+            sections.addArrangedSubview(makeUsageHistory(records, timezone: timezone))
         }
         return panel(sections)
     }
@@ -282,7 +294,10 @@ private final class UsageContentView: NSView {
         }
 
         let listView: NSView
-        if keys.count <= 6 {
+        let estimatedHeight = keys.reduce(CGFloat(0)) { partial, key in
+            partial + (key.quota > 0 ? 56 : 27)
+        } + CGFloat(max(keys.count - 1, 0) * 2)
+        if estimatedHeight <= 172 {
             listView = stack
         } else {
             let documentView = FlippedView()
@@ -338,11 +353,123 @@ private final class UsageContentView: NSView {
         top.spacing = 6
 
         top.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+        top.widthAnchor.constraint(equalToConstant: 286).isActive = true
+
+        guard key.quota > 0 else {
+            top.heightAnchor.constraint(equalToConstant: 27).isActive = true
+            return top
+        }
+
+        let quota = label(
+            "额度：\(currency(key.quotaUsed)) / \(currency(key.quota))",
+            size: 10,
+            color: .secondaryLabelColor
+        )
+        quota.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        let progress = ThinQuotaProgressView(progress: key.progress)
+        progress.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            top.widthAnchor.constraint(equalToConstant: 286),
-            top.heightAnchor.constraint(equalToConstant: 27)
+            progress.widthAnchor.constraint(equalToConstant: 286),
+            progress.heightAnchor.constraint(equalToConstant: 4)
         ])
-        return top
+        let detail = NSStackView(views: [quota, progress])
+        detail.orientation = .vertical
+        detail.alignment = .leading
+        detail.spacing = 4
+
+        let row = NSStackView(views: [top, detail])
+        row.orientation = .vertical
+        row.alignment = .leading
+        row.spacing = 1
+        row.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 3, right: 0)
+        return row
+    }
+
+    private func makeUsageHistory(_ records: [UsageRecord], timezone: String) -> NSView {
+        let title = label("使用记录", size: 11, weight: .semibold)
+        let rows = NSStackView()
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = 2
+        rows.translatesAutoresizingMaskIntoConstraints = false
+
+        if records.isEmpty {
+            let empty = label("暂无使用记录", size: 11, color: .secondaryLabelColor)
+            empty.alignment = .center
+            empty.widthAnchor.constraint(equalToConstant: 286).isActive = true
+            empty.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            rows.addArrangedSubview(empty)
+        } else {
+            records.prefix(UsageSnapshot.maximumUsageRecords).forEach {
+                rows.addArrangedSubview(makeUsageHistoryRow($0, timezone: timezone))
+            }
+        }
+
+        let list: NSView
+        let listHeight = CGFloat(records.prefix(UsageSnapshot.maximumUsageRecords).count * 39)
+        if listHeight <= 195 {
+            list = rows
+        } else {
+            let document = FlippedView()
+            document.translatesAutoresizingMaskIntoConstraints = false
+            document.addSubview(rows)
+            NSLayoutConstraint.activate([
+                rows.topAnchor.constraint(equalTo: document.topAnchor),
+                rows.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+                rows.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+                rows.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+                document.widthAnchor.constraint(equalToConstant: 286)
+            ])
+            let scroll = NSScrollView()
+            scroll.drawsBackground = false
+            scroll.borderType = .noBorder
+            scroll.hasVerticalScroller = true
+            scroll.autohidesScrollers = true
+            scroll.documentView = document
+            scroll.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                scroll.widthAnchor.constraint(equalToConstant: 286),
+                scroll.heightAnchor.constraint(equalToConstant: 195)
+            ])
+            list = scroll
+        }
+
+        let section = NSStackView(views: [title, list])
+        section.orientation = .vertical
+        section.alignment = .leading
+        section.spacing = 6
+        return section
+    }
+
+    private func makeUsageHistoryRow(_ record: UsageRecord, timezone: String) -> NSView {
+        let key = label(record.apiKeyName, size: 10, weight: .medium)
+        key.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let model = label(record.model, size: 10, color: .secondaryLabelColor)
+        model.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let cost = label(usageCost(record.actualCost), size: 10, weight: .medium)
+        cost.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        cost.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let top = NSStackView(views: [key, model, NSView(), cost])
+        top.orientation = .horizontal
+        top.alignment = .firstBaseline
+        top.spacing = 6
+
+        let effort = label(reasoningEffortTitle(record.reasoningEffort), size: 9, color: .tertiaryLabelColor)
+        let date = label(usageDate(record.createdAt, timezone: timezone), size: 9, color: .tertiaryLabelColor)
+        date.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        let bottom = NSStackView(views: [effort, NSView(), date])
+        bottom.orientation = .horizontal
+        bottom.alignment = .firstBaseline
+
+        let row = NSStackView(views: [top, bottom])
+        row.orientation = .vertical
+        row.alignment = .leading
+        row.spacing = 2
+        row.edgeInsets = NSEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
+        row.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        row.heightAnchor.constraint(equalToConstant: 37).isActive = true
+        return row
     }
 
     private func unavailableRow(_ message: String) -> NSView {
@@ -549,6 +676,31 @@ private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+private final class ThinQuotaProgressView: NSView {
+    private let progress: Double
+
+    init(progress: Double) {
+        self.progress = min(max(progress, 0), 1)
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let track = NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+        NSColor.secondaryLabelColor.withAlphaComponent(0.13).setFill()
+        track.fill()
+        guard progress > 0 else { return }
+        let fillRect = NSRect(x: 0, y: 0, width: max(bounds.width * progress, bounds.height), height: bounds.height)
+        let fill = NSBezierPath(roundedRect: fillRect, xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+        StatusRingRenderer.color(for: progress).setFill()
+        fill.fill()
+    }
+}
+
 @MainActor
 private final class LargeUsageRingView: NSView {
     private let snapshot: UsageSnapshot
@@ -659,6 +811,33 @@ private let timeFormatter: DateFormatter = {
 
 private func currency(_ value: Double) -> String {
     String(format: "$%.2f", value)
+}
+
+private func usageCost(_ value: Double) -> String {
+    String(format: "$%.4f", max(value, 0))
+}
+
+private func reasoningEffortTitle(_ value: String?) -> String {
+    guard let value, !value.isEmpty else { return "推理：--" }
+    let localized: String
+    switch value.lowercased() {
+    case "none": localized = "无"
+    case "minimal": localized = "最小"
+    case "low": localized = "低"
+    case "medium": localized = "中"
+    case "high": localized = "高"
+    case "xhigh": localized = "极高"
+    default: localized = value
+    }
+    return "推理：\(localized)"
+}
+
+private func usageDate(_ date: Date, timezone: String) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "zh_CN")
+    formatter.timeZone = TimeZone(identifier: timezone) ?? .current
+    formatter.dateFormat = "MM-dd HH:mm:ss"
+    return formatter.string(from: date)
 }
 
 private func compactTokenCount(_ value: Int64) -> String {

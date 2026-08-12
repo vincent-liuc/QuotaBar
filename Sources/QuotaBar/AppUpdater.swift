@@ -136,7 +136,7 @@ actor AppUpdater {
     init(
         session: URLSession = .shared,
         latestReleaseURL: URL = URL(
-            string: "https://api.github.com/repos/vincent-liuc/openai-usage/releases/latest"
+            string: "https://api.github.com/repos/vincent-liuc/QuotaBar/releases/latest"
         )!,
         fileManager: FileManager = .default
     ) {
@@ -150,7 +150,7 @@ actor AppUpdater {
         request.timeoutInterval = 20
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-        request.setValue("OpenAIUsageBar/\(currentVersion)", forHTTPHeaderField: "User-Agent")
+        request.setValue("QuotaBar/\(currentVersion)", forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else {
@@ -167,7 +167,7 @@ actor AppUpdater {
         let expectedChecksum = try await fetchChecksum(for: release)
         var request = URLRequest(url: release.downloadURL)
         request.timeoutInterval = 120
-        request.setValue("OpenAIUsageBar/\(release.version)", forHTTPHeaderField: "User-Agent")
+        request.setValue("QuotaBar/\(release.version)", forHTTPHeaderField: "User-Agent")
         let (temporaryURL, response) = try await session.download(for: request)
         guard let response = response as? HTTPURLResponse else {
             throw AppUpdaterError.invalidResponse
@@ -191,7 +191,7 @@ actor AppUpdater {
     private func fetchChecksum(for release: UpdateRelease) async throws -> String {
         var request = URLRequest(url: release.checksumURL)
         request.timeoutInterval = 20
-        request.setValue("OpenAIUsageBar/\(release.version)", forHTTPHeaderField: "User-Agent")
+        request.setValue("QuotaBar/\(release.version)", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else {
             throw AppUpdaterError.invalidResponse

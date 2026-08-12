@@ -69,6 +69,7 @@ final class UsageStore {
         launchAtLogin: Bool,
         showAPIKeyDetails: Bool,
         showMetricCards: Bool,
+        showUsageHistory: Bool,
         makeActive: Bool = true
     ) async throws {
         settingsMessage = nil
@@ -86,7 +87,8 @@ final class UsageStore {
             refreshInterval: refreshInterval,
             launchAtLogin: launchAtLogin,
             showAPIKeyDetails: showAPIKeyDetails,
-            showMetricCards: showMetricCards
+            showMetricCards: showMetricCards,
+            showUsageHistory: showUsageHistory
         )
         try credentialStore.save(credentials, for: validatedProfile.id)
         if let index = profiles.firstIndex(where: { $0.id == validatedProfile.id }) {
@@ -161,7 +163,8 @@ final class UsageStore {
             snapshot = UsageSnapshot(
                 weeklyUsage: usage.weeklyUsage,
                 accountMetrics: usage.accountMetrics,
-                keys: usage.keys
+                keys: usage.keys,
+                usageRecords: usage.usageRecords
             )
             updateCapabilities(usage.capabilities, for: profile.id)
             phase = .ready

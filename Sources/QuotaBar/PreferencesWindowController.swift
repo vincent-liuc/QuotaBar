@@ -57,6 +57,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let launchAtLoginSwitch = NSSwitch()
     private let showAPIKeyDetailsSwitch = NSSwitch()
     private let showMetricCardsSwitch = NSSwitch()
+    private let showUsageHistorySwitch = NSSwitch()
     private let messageLabel = settingsLabel("", size: 11, color: .systemRed)
     private let connectionLabel = settingsLabel("尚未检测", size: 11, color: .secondaryLabelColor)
     private let testButton = NSButton(title: "测试连接", target: nil, action: nil)
@@ -144,6 +145,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         launchAtLoginSwitch.state = store.preferences.launchAtLogin ? .on : .off
         showAPIKeyDetailsSwitch.state = store.preferences.showAPIKeyDetails ? .on : .off
         showMetricCardsSwitch.state = store.preferences.showMetricCards ? .on : .off
+        showUsageHistorySwitch.state = store.preferences.showUsageHistory ? .on : .off
 
         let timezoneIDs = ["Asia/Shanghai", TimeZone.current.identifier, "UTC"].uniqued()
         timezonePopup.addItems(withTitles: timezoneIDs)
@@ -274,7 +276,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             sectionTitle("Dashboard组件设置"),
             settingsPanel([
                 settingsRow(title: "累计指标", control: showMetricCardsSwitch),
-                settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch)
+                settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch),
+                settingsRow(title: "使用记录", control: showUsageHistorySwitch)
             ])
         ])
     }
@@ -454,7 +457,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         guard let checked = profile.lastCheckedAt else { return "尚未检测" }
         let names: [(StationCapability, String)] = [
             (.subscriptions, "订阅"), (.accountMetrics, "累计指标"),
-            (.apiKeyDailyUsage, "当日用量"), (.concurrency, "并发")
+            (.apiKeyDailyUsage, "当日用量"), (.concurrency, "并发"),
+            (.usageHistory, "使用记录")
         ]
         let supported = names.filter { profile.capabilities.contains($0.0) }.map(\.1)
         return "已验证：\(supported.isEmpty ? "基础 Key 列表" : supported.joined(separator: "、")) · \(settingsTimeFormatter.string(from: checked))"
@@ -526,7 +530,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
                     refreshInterval: UserPreferences.normalizedRefreshInterval(refreshField.doubleValue),
                     launchAtLogin: launchAtLoginSwitch.state == .on,
                     showAPIKeyDetails: showAPIKeyDetailsSwitch.state == .on,
-                    showMetricCards: showMetricCardsSwitch.state == .on
+                    showMetricCards: showMetricCardsSwitch.state == .on,
+                    showUsageHistory: showUsageHistorySwitch.state == .on
                 )
                 onSaved?()
             } catch {

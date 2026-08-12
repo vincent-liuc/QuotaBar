@@ -78,6 +78,9 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         if supportsDailyUsage {
             capabilities.insert(.apiKeyDailyUsage)
         }
+        if (try? await fetchUsageHistory(profile: profile, token: token)) != nil {
+            capabilities.insert(.usageHistory)
+        }
 
         return ConnectionTestResult(
             capabilities: capabilities,
@@ -105,10 +108,14 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         async let todayUsage = optional {
             try await self.fetchTodayUsage(profile: profile, token: token, keyIDs: keys.map(\.id))
         }
+        async let usageHistory = optional {
+            try await self.fetchUsageHistory(profile: profile, token: token)
+        }
 
         let subscriptionResult = await subscriptions
         let metricsResult = await accountMetrics
         let usageResult = await todayUsage
+        let historyResult = await usageHistory
         let weeklyUsage = subscriptionResult.flatMap { selectWeeklyUsage($0, selection: profile.subscriptionSelection) }
         let keysWithUsage = keys.map { key in
             var updated = key
@@ -120,10 +127,12 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         if metricsResult != nil { capabilities.insert(.accountMetrics) }
         if usageResult != nil { capabilities.insert(.apiKeyDailyUsage) }
         if keys.contains(where: { $0.currentConcurrency != nil }) { capabilities.insert(.concurrency) }
+        if historyResult != nil { capabilities.insert(.usageHistory) }
         return UsageData(
             weeklyUsage: weeklyUsage,
             accountMetrics: metricsResult,
             keys: keysWithUsage,
+            usageRecords: historyResult,
             capabilities: capabilities
         )
     }
@@ -254,6 +263,24 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         )
     }
 
+    private func fetchUsageHistory(profile: StationProfile, token: String) async throws -> [UsageRecord] {
+        let range = try UsageHistoryDateRange(timezone: profile.timezone)
+        var components = URLComponents(url: try endpoint(profile, "usage"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "page", value: "1"),
+            URLQueryItem(name: "page_size", value: "50"),
+            URLQueryItem(name: "start_date", value: range.startDate),
+            URLQueryItem(name: "end_date", value: range.endDate),
+            URLQueryItem(name: "sort_by", value: "created_at"),
+            URLQueryItem(name: "sort_order", value: "desc"),
+            URLQueryItem(name: "timezone", value: profile.timezone)
+        ]
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let envelope: APIEnvelope<UsageRecordListData> = try await send(request)
+        return envelope.data.items
+    }
+
     private func endpoint(_ profile: StationProfile, _ path: String) throws -> URL {
         guard let baseURL = profile.apiBaseURL else { throw StationProfileError.invalidServiceURL }
         return baseURL.appending(path: path)
@@ -284,6 +311,29 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
     ) async -> URLRequest? {
         guard task.currentRequest?.url?.origin == request.url?.origin else { return nil }
         return request
+    }
+}
+
+struct UsageHistoryDateRange: Equatable, Sendable {
+    let startDate: String
+    let endDate: String
+
+    init(timezone: String, now: Date = Date()) throws {
+        guard let timeZone = TimeZone(identifier: timezone) else {
+            throw StationProfileError.invalidTimezone
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        guard let yesterday = calendar.date(byAdding: .day, value: -1, to: now) else {
+            throw APIClientError.invalidResponse
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        startDate = formatter.string(from: yesterday)
+        endDate = formatter.string(from: now)
     }
 }
 

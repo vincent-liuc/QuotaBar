@@ -2,11 +2,14 @@
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
+source_svg="$project_dir/Assets/QuotaBarIcon.svg"
 source_png="$project_dir/Assets/AppIcon-1024.png"
 output_icns="$project_dir/Assets/AppIcon.icns"
-mark_svg="$project_dir/Assets/OpenAIMark.svg"
-mark_png="$project_dir/Assets/OpenAIMark.png"
-iconset_dir="/tmp/dev.ruobin.OpenAIUsageBar.iconset"
+mark_svg="$project_dir/Assets/QuotaMark.svg"
+mark_png="$project_dir/Assets/QuotaMark.png"
+iconset_dir="/tmp/dev.ruobin.QuotaBar.iconset"
+
+sips -z 1024 1024 -s format png "$source_svg" --out "$source_png" >/dev/null
 
 if [[ ! -f "$source_png" ]]; then
   echo "Missing icon source: $source_png" >&2

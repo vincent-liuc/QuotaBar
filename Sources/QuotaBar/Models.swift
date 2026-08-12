@@ -36,6 +36,49 @@ struct KeyListData: Decodable, Sendable {
     }
 }
 
+struct UsageRecordListData: Decodable, Sendable {
+    let items: [UsageRecord]
+    let total: Int
+    let page: Int?
+    let pageSize: Int?
+    let pages: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case items, total, page, pages
+        case pageSize = "page_size"
+    }
+}
+
+struct UsageRecordAPIKey: Decodable, Equatable, Sendable {
+    let name: String
+}
+
+struct UsageRecord: Decodable, Equatable, Sendable {
+    let id: Int?
+    let apiKeyID: Int?
+    let apiKey: UsageRecordAPIKey?
+    let model: String
+    let reasoningEffort: String?
+    let actualCost: Double
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, model
+        case apiKeyID = "api_key_id"
+        case apiKey = "api_key"
+        case reasoningEffort = "reasoning_effort"
+        case actualCost = "actual_cost"
+        case createdAt = "created_at"
+    }
+
+    var apiKeyName: String {
+        let name = apiKey?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !name.isEmpty { return name }
+        if let apiKeyID { return "API Key #\(apiKeyID)" }
+        return "已删除的 API Key"
+    }
+}
+
 struct APIKeyUsagePayload: Codable, Sendable {
     let apiKeyIDs: [Int]
 
@@ -107,6 +150,7 @@ struct UsageData: Equatable, Sendable {
     let weeklyUsage: WeeklyUsage?
     let accountMetrics: AccountMetrics?
     let keys: [UsageKey]
+    let usageRecords: [UsageRecord]?
     let capabilities: Set<StationCapability>
 }
 
@@ -139,7 +183,10 @@ struct UsageKey: Decodable, Equatable, Sendable {
 }
 
 struct UsageSnapshot: Equatable, Sendable {
+    static let maximumUsageRecords = 10
+
     let keys: [UsageKey]
+    let usageRecords: [UsageRecord]?
     let weeklyUsage: WeeklyUsage?
     let used: Double
     let total: Double
@@ -161,6 +208,7 @@ struct UsageSnapshot: Equatable, Sendable {
         weeklyUsage: WeeklyUsage?,
         accountMetrics: AccountMetrics? = nil,
         keys: [UsageKey],
+        usageRecords: [UsageRecord]? = nil,
         fetchedAt: Date = Date()
     ) {
         self.keys = keys.filter(\.isActive).sorted { lhs, rhs in
@@ -170,6 +218,7 @@ struct UsageSnapshot: Equatable, Sendable {
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
         self.weeklyUsage = weeklyUsage
+        self.usageRecords = usageRecords.map { Array($0.prefix(Self.maximumUsageRecords)) }
         used = weeklyUsage?.used ?? 0
         total = weeklyUsage?.total ?? 0
         self.accountMetrics = accountMetrics

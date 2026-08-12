@@ -18,7 +18,7 @@ enum StatusRingRenderer {
             } else {
                 drawStateIndicator(for: phase, in: rect)
             }
-            drawOpenAIMark(in: rect)
+            drawQuotaMark(in: rect)
             return true
         }
         image.isTemplate = false
@@ -42,8 +42,8 @@ enum StatusRingRenderer {
         path.stroke()
     }
 
-    private static func drawOpenAIMark(in rect: NSRect) {
-        guard let url = Bundle.main.url(forResource: "OpenAIMark", withExtension: "png"),
+    private static func drawQuotaMark(in rect: NSRect) {
+        guard let url = Bundle.main.url(forResource: "QuotaMark", withExtension: "png"),
               let mark = NSImage(contentsOf: url) else { return }
 
         let side: CGFloat = 10.8

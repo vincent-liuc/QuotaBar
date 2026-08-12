@@ -9,17 +9,20 @@ struct UserPreferences: Equatable, Sendable {
     let launchAtLogin: Bool
     let showAPIKeyDetails: Bool
     let showMetricCards: Bool
+    let showUsageHistory: Bool
 
     init(
         refreshInterval: TimeInterval,
         launchAtLogin: Bool,
         showAPIKeyDetails: Bool = true,
-        showMetricCards: Bool = true
+        showMetricCards: Bool = true,
+        showUsageHistory: Bool = true
     ) {
         self.refreshInterval = Self.normalizedRefreshInterval(refreshInterval)
         self.launchAtLogin = launchAtLogin
         self.showAPIKeyDetails = showAPIKeyDetails
         self.showMetricCards = showMetricCards
+        self.showUsageHistory = showUsageHistory
     }
 
     static func normalizedRefreshInterval(_ value: TimeInterval) -> TimeInterval {
@@ -29,7 +32,7 @@ struct UserPreferences: Equatable, Sendable {
 }
 
 final class PreferencesStore: @unchecked Sendable {
-    static let currentLaunchRegistrationVersion = 2
+    static let currentLaunchRegistrationVersion = 3
 
     private enum Key {
         static let legacyKeyName = "apiKeyName"
@@ -37,6 +40,7 @@ final class PreferencesStore: @unchecked Sendable {
         static let launchAtLogin = "launchAtLogin"
         static let showAPIKeyDetails = "showAPIKeyDetails"
         static let showMetricCards = "showMetricCards"
+        static let showUsageHistory = "showUsageHistory"
         static let launchRegistrationVersion = "launchRegistrationVersion"
     }
 
@@ -60,12 +64,16 @@ final class PreferencesStore: @unchecked Sendable {
         let showMetricCards = defaults.object(forKey: Key.showMetricCards) == nil
             ? true
             : defaults.bool(forKey: Key.showMetricCards)
+        let showUsageHistory = defaults.object(forKey: Key.showUsageHistory) == nil
+            ? true
+            : defaults.bool(forKey: Key.showUsageHistory)
 
         return UserPreferences(
             refreshInterval: refreshInterval,
             launchAtLogin: launchAtLogin,
             showAPIKeyDetails: showAPIKeyDetails,
-            showMetricCards: showMetricCards
+            showMetricCards: showMetricCards,
+            showUsageHistory: showUsageHistory
         )
     }
 
@@ -75,6 +83,7 @@ final class PreferencesStore: @unchecked Sendable {
         defaults.set(preferences.launchAtLogin, forKey: Key.launchAtLogin)
         defaults.set(preferences.showAPIKeyDetails, forKey: Key.showAPIKeyDetails)
         defaults.set(preferences.showMetricCards, forKey: Key.showMetricCards)
+        defaults.set(preferences.showUsageHistory, forKey: Key.showUsageHistory)
     }
 
     var launchRegistrationNeedsRefresh: Bool {
@@ -83,5 +92,31 @@ final class PreferencesStore: @unchecked Sendable {
 
     func markLaunchRegistrationCurrent() {
         defaults.set(Self.currentLaunchRegistrationVersion, forKey: Key.launchRegistrationVersion)
+    }
+}
+
+enum AppDataMigration {
+    static let legacyBundleID = "dev.ruobin.OpenAIUsageBar"
+    private static let migrationKey = "didMigrateFromOpenAIUsageBar.v1"
+    private static let migratedKeys = [
+        "stationProfiles.v1",
+        "refreshInterval",
+        "launchAtLogin",
+        "showAPIKeyDetails",
+        "showMetricCards",
+        "launchRegistrationVersion"
+    ]
+
+    static func migrateLegacyDefaultsIfNeeded(
+        defaults: UserDefaults = .standard,
+        legacyDomainName: String = legacyBundleID
+    ) {
+        guard !defaults.bool(forKey: migrationKey) else { return }
+        if let legacy = defaults.persistentDomain(forName: legacyDomainName) {
+            for key in migratedKeys where defaults.object(forKey: key) == nil {
+                defaults.set(legacy[key], forKey: key)
+            }
+        }
+        defaults.set(true, forKey: migrationKey)
     }
 }

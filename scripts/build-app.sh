@@ -3,26 +3,25 @@ set -euo pipefail
 
 project_dir="${0:A:h:h}"
 configuration="${1:-release}"
-app_name="OpenAI用量"
-scratch_dir="/tmp/dev.ruobin.OpenAIUsageBar-build"
+app_name="QuotaBar"
+scratch_dir="/tmp/dev.ruobin.QuotaBar-build"
 bundle_dir="$scratch_dir/$app_name.app"
 contents_dir="$bundle_dir/Contents"
-output_zip="$project_dir/outputs/OpenAI-Usage-macOS.zip"
-source_zip="$project_dir/outputs/OpenAI-Usage-source.zip"
+output_zip="$project_dir/outputs/QuotaBar-macOS.zip"
+source_zip="$project_dir/outputs/QuotaBar-source.zip"
 architectures=(--arch arm64 --arch x86_64)
 
 cd "$project_dir"
 zsh scripts/build-icon.sh
 swift build --scratch-path "$scratch_dir" -c "$configuration" "${architectures[@]}"
-binary_path="$(swift build --scratch-path "$scratch_dir" -c "$configuration" "${architectures[@]}" --show-bin-path)/OpenAIUsageBar"
+binary_path="$(swift build --scratch-path "$scratch_dir" -c "$configuration" "${architectures[@]}" --show-bin-path)/QuotaBar"
 
 rm -rf "$bundle_dir" "$project_dir/outputs/$app_name.app"
 rm -f "$output_zip" "$source_zip"
-rm -f "$project_dir/outputs/OpenAI-Usage-Bar-macOS.zip" "$project_dir/outputs/OpenAI-Usage-Bar-source.zip"
 mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
-cp "$binary_path" "$contents_dir/MacOS/OpenAIUsageBar"
+cp "$binary_path" "$contents_dir/MacOS/QuotaBar"
 cp "$project_dir/Assets/AppIcon.icns" "$contents_dir/Resources/AppIcon.icns"
-cp "$project_dir/Assets/OpenAIMark.png" "$contents_dir/Resources/OpenAIMark.png"
+cp "$project_dir/Assets/QuotaMark.png" "$contents_dir/Resources/QuotaMark.png"
 
 cat > "$contents_dir/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -32,23 +31,23 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleExecutable</key>
-    <string>OpenAIUsageBar</string>
+    <string>QuotaBar</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.ruobin.OpenAIUsageBar</string>
+    <string>dev.ruobin.QuotaBar</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleName</key>
-    <string>OpenAI用量</string>
+    <string>QuotaBar</string>
     <key>CFBundleDisplayName</key>
-    <string>OpenAI用量</string>
+    <string>QuotaBar</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.8.0</string>
+    <string>1.9.0</string>
     <key>CFBundleVersion</key>
-    <string>12</string>
+    <string>13</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>

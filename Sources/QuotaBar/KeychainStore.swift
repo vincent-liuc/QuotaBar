@@ -14,18 +14,30 @@ enum KeychainError: LocalizedError {
 }
 
 final class CredentialStore: @unchecked Sendable {
-    private let service = "dev.ruobin.OpenAIUsageBar"
+    static let service = "dev.ruobin.QuotaBar"
+    static let legacyServices = ["dev.ruobin.OpenAIUsageBar"]
     private let legacyAccount = "api-credentials"
 
     func load(for profileID: UUID) throws -> Credentials? {
-        try load(account: account(for: profileID))
+        try loadMigrating(account: account(for: profileID))
     }
 
     func loadLegacy() throws -> Credentials? {
-        try load(account: legacyAccount)
+        try loadMigrating(account: legacyAccount)
     }
 
-    private func load(account: String) throws -> Credentials? {
+    private func loadMigrating(account: String) throws -> Credentials? {
+        if let current = try load(account: account, service: Self.service) { return current }
+        for legacyService in Self.legacyServices {
+            if let legacy = try load(account: account, service: legacyService) {
+                try save(legacy, account: account)
+                return legacy
+            }
+        }
+        return nil
+    }
+
+    private func load(account: String, service: String) throws -> Credentials? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -51,7 +63,7 @@ final class CredentialStore: @unchecked Sendable {
         let data = try JSONEncoder().encode(StoredCredentials(credentials))
         let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
+            kSecAttrService as String: Self.service,
             kSecAttrAccount as String: account
         ]
 
@@ -81,13 +93,15 @@ final class CredentialStore: @unchecked Sendable {
     }
 
     private func delete(account: String) throws {
-        let status = SecItemDelete([
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ] as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(status)
+        for service in [Self.service] + Self.legacyServices {
+            let status = SecItemDelete([
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account
+            ] as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                throw KeychainError.unexpectedStatus(status)
+            }
         }
     }
 

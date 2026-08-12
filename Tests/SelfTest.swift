@@ -4,13 +4,27 @@ import Foundation
 enum SelfTest {
     static func main() async throws {
         try testDecodesUsageResponse()
+        try testDecodesUsageHistory()
         testWeeklyUsageAndProgress()
         testPreferenceNormalization()
         try testStationProfiles()
         try testReleaseResolution()
         try await testPaginationAndDeduplication()
         try await testOptionalEndpointDegradation()
-        print("Self-test passed: 7 checks")
+        testLegacyDefaultsMigration()
+        print("Self-test passed: 9 checks")
+    }
+
+    private static func testDecodesUsageHistory() throws {
+        let json = #"{"code":0,"message":"success","data":{"items":[{"id":91,"api_key_id":104,"api_key":{"name":"Primary"},"model":"gpt-5.6","reasoning_effort":"high","actual_cost":0.012345,"created_at":"2026-08-12T10:31:58.067319+08:00"},{"id":92,"api_key_id":105,"api_key":null,"model":"gpt-5.6-mini","reasoning_effort":null,"actual_cost":0,"created_at":"2026-08-12T10:30:00+08:00"}],"total":2,"page":1,"page_size":50,"pages":1}}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
+        let result = try decoder.decode(APIEnvelope<UsageRecordListData>.self, from: Data(json.utf8))
+        require(result.data.items[0].apiKeyName == "Primary", "usage history nested API key name")
+        require(result.data.items[0].reasoningEffort == "high", "usage history reasoning effort")
+        require(result.data.items[0].actualCost == 0.012345, "usage history actual cost")
+        require(result.data.items[1].apiKeyName == "API Key #105", "usage history missing key fallback")
+        require(result.data.items[1].reasoningEffort == nil, "usage history optional reasoning effort")
     }
 
     private static func testDecodesUsageResponse() throws {
@@ -78,6 +92,9 @@ enum SelfTest {
         require(over.remaining == 0, "remaining lower bound")
         require(over.isOverQuota, "over-quota flag")
         require(invalid.progress == 0, "zero-quota progress")
+        require(normal.keys[0].quota > 0 && normal.keys[0].progress == 0.25, "limited key quota progress")
+        let unlimited = usageKey(id: 8, total: 0, used: 20)
+        require(unlimited.quota == 0 && unlimited.progress == 0, "unlimited key has no quota progress")
         let unavailable = UsageSnapshot(weeklyUsage: nil, keys: keys)
         require(!unavailable.hasWeeklyUsage, "missing weekly usage remains unavailable")
     }
@@ -92,21 +109,40 @@ enum SelfTest {
             refreshInterval: 30,
             launchAtLogin: true,
             showAPIKeyDetails: false,
-            showMetricCards: false
+            showMetricCards: false,
+            showUsageHistory: false
         )
         require(preferences.launchAtLogin, "launch-at-login preference")
         require(!preferences.showAPIKeyDetails, "API key details preference")
         require(!preferences.showMetricCards, "metric cards preference")
+        require(!preferences.showUsageHistory, "usage history preference")
 
-        let suiteName = "dev.ruobin.OpenAIUsageBar.SelfTest.\(UUID().uuidString)"
+        let suiteName = "dev.ruobin.QuotaBar.SelfTest.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = PreferencesStore(defaults: defaults)
         let initial = store.load()
         require(initial.showAPIKeyDetails, "API key details default enabled")
         require(initial.showMetricCards, "metric cards default enabled")
+        require(initial.showUsageHistory, "usage history default enabled")
         store.save(preferences)
         require(store.load() == preferences, "display preferences persisted")
+    }
+
+    private static func testLegacyDefaultsMigration() {
+        let targetSuite = "dev.ruobin.QuotaBar.MigrationSelfTest.\(UUID().uuidString)"
+        let legacySuite = "dev.ruobin.OpenAIUsageBar.MigrationSelfTest.\(UUID().uuidString)"
+        let target = UserDefaults(suiteName: targetSuite)!
+        let legacy = UserDefaults(suiteName: legacySuite)!
+        defer {
+            target.removePersistentDomain(forName: targetSuite)
+            legacy.removePersistentDomain(forName: legacySuite)
+        }
+        legacy.set(45.0, forKey: "refreshInterval")
+        legacy.set(false, forKey: "showMetricCards")
+        AppDataMigration.migrateLegacyDefaultsIfNeeded(defaults: target, legacyDomainName: legacySuite)
+        require(target.double(forKey: "refreshInterval") == 45, "legacy refresh preference migrated")
+        require(target.object(forKey: "showMetricCards") != nil && !target.bool(forKey: "showMetricCards"), "legacy boolean preference migrated")
     }
 
     private static func testStationProfiles() throws {
@@ -123,7 +159,13 @@ enum SelfTest {
         require((try? StationProfile(name: "HTTP", serviceURL: "http://example.com").validated()) == nil, "HTTP rejected")
         require((try? StationProfile(name: "Secret", serviceURL: "https://user:pass@example.com").validated()) == nil, "URL credentials rejected")
 
-        let suiteName = "dev.ruobin.OpenAIUsageBar.StationSelfTest.\(UUID().uuidString)"
+        let rangeNow = ISO8601DateFormatter().date(from: "2026-08-11T16:30:00Z")!
+        let shanghaiRange = try UsageHistoryDateRange(timezone: "Asia/Shanghai", now: rangeNow)
+        let losAngelesRange = try UsageHistoryDateRange(timezone: "America/Los_Angeles", now: rangeNow)
+        require(shanghaiRange.startDate == "2026-08-11" && shanghaiRange.endDate == "2026-08-12", "Shanghai local date range")
+        require(losAngelesRange.startDate == "2026-08-10" && losAngelesRange.endDate == "2026-08-11", "Los Angeles local date range")
+
+        let suiteName = "dev.ruobin.QuotaBar.StationSelfTest.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let profileStore = StationProfileStore(defaults: defaults)
@@ -137,15 +179,15 @@ enum SelfTest {
         require(SemanticVersion("v2.0")! == SemanticVersion("2.0.0")!, "semantic version normalization")
 
         let release = GitHubRelease(
-            tagName: "v1.8.0",
-            htmlURL: URL(string: "https://github.com/vincent-liuc/openai-usage/releases/tag/v1.8.0")!,
+            tagName: "v1.9.0",
+            htmlURL: URL(string: "https://github.com/vincent-liuc/QuotaBar/releases/tag/v1.9.0")!,
             assets: [
                 .init(
-                    name: "OpenAI用量-1.8.0-universal.dmg",
+                    name: "QuotaBar-1.9.0-universal.dmg",
                     browserDownloadURL: URL(string: "https://example.com/app.dmg")!
                 ),
                 .init(
-                    name: "OpenAI用量-1.8.0-universal.dmg.sha256",
+                    name: "QuotaBar-1.9.0-universal.dmg.sha256",
                     browserDownloadURL: URL(string: "https://example.com/app.dmg.sha256")!
                 )
             ]
@@ -156,15 +198,15 @@ enum SelfTest {
         ) else {
             fatalError("Self-test failed: update release available")
         }
-        require(update.version == "1.8.0", "update version normalized")
+        require(update.version == "1.9.0", "update version normalized")
         require(update.fileName.hasSuffix("universal.dmg"), "universal DMG selected")
         guard case .upToDate(let latest) = try ReleaseResolver.resolve(
             release,
-            currentVersion: "1.8.0"
+            currentVersion: "1.9.0"
         ) else {
             fatalError("Self-test failed: up-to-date release")
         }
-        require(latest == "1.8.0", "latest version reported")
+        require(latest == "1.9.0", "latest version reported")
     }
 
     private static func testPaginationAndDeduplication() async throws {
@@ -206,6 +248,18 @@ enum SelfTest {
                     url: url,
                     json: #"{"code":0,"message":"success","data":{"stats":{"2":{"api_key_id":2,"today_actual_cost":8.5,"total_actual_cost":25}}}}"#
                 )
+            }
+            if url.path.hasSuffix("/api/v1/usage") {
+                let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                func query(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+                require(query("page_size") == "50", "usage history requests 50 records")
+                require(query("sort_by") == "created_at" && query("sort_order") == "desc", "usage history sort")
+                require(query("timezone") == "Asia/Shanghai", "usage history station timezone")
+                require(query("start_date") != nil && query("end_date") != nil, "usage history date range")
+                let records = (1...12).map { index in
+                    #"{"id":\#(index),"api_key_id":1,"api_key":{"name":"One"},"model":"gpt-5.6","reasoning_effort":"medium","actual_cost":0.01,"created_at":"2026-08-12T10:31:58+08:00"}"#
+                }.joined(separator: ",")
+                return mockResponse(url: url, json: #"{"code":0,"message":"success","data":{"items":[\#(records)],"total":12,"page":1,"page_size":50,"pages":1}}"#)
             }
 
             let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -261,6 +315,10 @@ enum SelfTest {
         require(usage.accountMetrics?.totalTokens == 137_630_389, "total tokens decoded")
         require(usage.accountMetrics?.totalActualCost == 106.38925756, "total actual cost decoded")
         require(usage.capabilities.contains(.apiKeyDailyUsage), "daily usage capability detected")
+        require(usage.capabilities.contains(.usageHistory), "usage history capability detected")
+        require(usage.usageRecords?.count == 12, "all fetched usage history retained in data layer")
+        let snapshot = UsageSnapshot(weeklyUsage: usage.weeklyUsage, keys: usage.keys, usageRecords: usage.usageRecords)
+        require(snapshot.usageRecords?.count == 10, "dashboard usage history limited to 10")
     }
 
     private static func testOptionalEndpointDegradation() async throws {
@@ -294,6 +352,7 @@ enum SelfTest {
         require(usage.weeklyUsage == nil, "missing subscription is unavailable")
         require(usage.accountMetrics == nil, "missing metrics are unavailable")
         require(usage.keys[0].todayActualCost == nil, "missing daily usage is not zero")
+        require(usage.usageRecords == nil, "missing usage history is unavailable")
         require(usage.capabilities.isEmpty, "unsupported capabilities excluded")
     }
 
