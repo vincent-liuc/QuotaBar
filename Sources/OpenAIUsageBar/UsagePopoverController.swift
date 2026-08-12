@@ -404,7 +404,7 @@ private final class UsageContentView: NSView {
         let container = HairlineSeparatorView()
         NSLayoutConstraint.activate([
             container.widthAnchor.constraint(equalToConstant: 286),
-            container.heightAnchor.constraint(equalToConstant: 23)
+            container.heightAnchor.constraint(equalToConstant: 17)
         ])
         return container
     }
@@ -508,7 +508,7 @@ private final class HairlineSeparatorView: NSView {
         path.move(to: NSPoint(x: bounds.minX, y: bounds.midY))
         path.line(to: NSPoint(x: bounds.maxX, y: bounds.midY))
         path.lineWidth = lineWidth
-        NSColor.separatorColor.withAlphaComponent(0.16).setStroke()
+        NSColor.separatorColor.withAlphaComponent(0.08).setStroke()
         path.stroke()
     }
 

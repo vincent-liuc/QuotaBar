@@ -106,7 +106,7 @@ enum SelfTest {
     }
 
     private static func testReleaseResolution() throws {
-        require(SemanticVersion("1.7.0")! > SemanticVersion("1.6.9")!, "semantic version ordering")
+        require(SemanticVersion("1.7.1")! > SemanticVersion("1.7.0")!, "semantic version ordering")
         require(SemanticVersion("v2.0")! == SemanticVersion("2.0.0")!, "semantic version normalization")
 
         let release = GitHubRelease(
@@ -125,7 +125,7 @@ enum SelfTest {
         )
         guard case .available(let update) = try ReleaseResolver.resolve(
             release,
-            currentVersion: "1.7.0"
+            currentVersion: "1.7.1"
         ) else {
             fatalError("Self-test failed: update release available")
         }

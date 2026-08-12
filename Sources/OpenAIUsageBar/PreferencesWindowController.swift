@@ -7,7 +7,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate {
     init(store: UsageStore) {
         preferencesController = PreferencesViewController(store: store)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 310),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -85,12 +85,12 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         }
 
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: 520),
-            root.heightAnchor.constraint(equalToConstant: 440),
+            root.widthAnchor.constraint(equalToConstant: 480),
+            root.heightAnchor.constraint(equalToConstant: 310),
             header.topAnchor.constraint(equalTo: root.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 88),
+            header.heightAnchor.constraint(equalToConstant: 64),
             headerDivider.topAnchor.constraint(equalTo: header.bottomAnchor),
             headerDivider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             headerDivider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -104,7 +104,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             footer.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             footer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            footer.heightAnchor.constraint(equalToConstant: 60)
+            footer.heightAnchor.constraint(equalToConstant: 48)
         ])
 
         view = root
@@ -121,7 +121,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         showMetricCardsSwitch.state = store.preferences.showMetricCards ? .on : .off
 
         configureTextField(emailField, placeholder: "name@example.com")
-        configureTextField(passwordField, placeholder: "输入接口密码")
+        configureTextField(passwordField, placeholder: "输入登录密码")
         refreshField.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         refreshField.alignment = .right
         refreshField.isBezeled = false
@@ -169,7 +169,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         let stack = NSStackView(views: tabButtons)
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 8
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         let header = NSView()
         header.addSubview(stack)
@@ -201,14 +201,24 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         messageLabel.maximumNumberOfLines = 2
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.isHidden = true
+
+        let lockIcon = NSImageView(image: settingsSymbol("lock.fill", pointSize: 9))
+        lockIcon.contentTintColor = .secondaryLabelColor
+        let keychainNote = settingsLabel("账号密码仅保存在本机钥匙串", size: 10,
+                                         color: .secondaryLabelColor)
+        let note = NSStackView(views: [lockIcon, keychainNote])
+        note.orientation = .horizontal
+        note.alignment = .centerY
+        note.spacing = 5
+
         return tabStack([
             sectionTitle("账户"),
             settingsPanel([
-                fieldRow(title: "接口账号", field: emailField),
-                fieldRow(title: "密码", field: passwordField)
+                fieldRow(title: "登录账号", field: emailField),
+                fieldRow(title: "登录密码", field: passwordField)
             ]),
             messageLabel
-        ])
+        ], bottomView: note)
     }
 
     private func makeGeneralTab() -> NSView {
@@ -234,7 +244,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
     private func makeDisplayTab() -> NSView {
         return tabStack([
-            sectionTitle("Dashboard 内容"),
+            sectionTitle("Dashboard组件设置"),
             settingsPanel([
                 settingsRow(title: "累计指标", control: showMetricCardsSwitch),
                 settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch)
@@ -255,14 +265,16 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         ])
     }
 
-    private func tabStack(_ views: [NSView]) -> NSView {
+    private func tabStack(_ views: [NSView], bottomView: NSView? = nil) -> NSView {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-        let stack = NSStackView(views: views + [spacer])
+        var arrangedViews = views + [spacer]
+        if let bottomView { arrangedViews.append(bottomView) }
+        let stack = NSStackView(views: arrangedViews)
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 22, left: 32, bottom: 20, right: 32)
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 16, left: 24, bottom: 14, right: 24)
         for view in views {
             view.setContentHuggingPriority(.required, for: .vertical)
             view.setContentCompressionResistancePriority(.required, for: .vertical)
@@ -288,18 +300,18 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         stack.translatesAutoresizingMaskIntoConstraints = false
         let panel = NSView()
         panel.wantsLayer = true
-        panel.layer?.cornerRadius = 10
+        panel.layer?.cornerRadius = 9
         panel.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.58).cgColor
         panel.addSubview(stack)
         NSLayoutConstraint.activate([
-            panel.widthAnchor.constraint(equalToConstant: 456),
+            panel.widthAnchor.constraint(equalToConstant: 432),
             stack.topAnchor.constraint(equalTo: panel.topAnchor),
             stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 14),
             stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -14),
             stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor)
         ])
         for view in stack.arrangedSubviews where view is NSBox {
-            view.widthAnchor.constraint(equalToConstant: 428).isActive = true
+            view.widthAnchor.constraint(equalToConstant: 404).isActive = true
         }
         return panel
     }
@@ -310,28 +322,25 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         let row = NSStackView(views: [titleLabel, spacer, control])
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.widthAnchor.constraint(equalToConstant: 428).isActive = true
-        row.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        row.widthAnchor.constraint(equalToConstant: 404).isActive = true
+        row.heightAnchor.constraint(equalToConstant: 44).isActive = true
         return row
     }
 
     private func fieldRow(title: String, field: NSTextField) -> NSView {
-        field.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        field.widthAnchor.constraint(equalToConstant: 276).isActive = true
         return settingsRow(title: title, control: field)
     }
 
     private func makeFooter() -> NSView {
-        let lockIcon = NSImageView(image: settingsSymbol("lock.fill", pointSize: 10))
-        lockIcon.contentTintColor = .secondaryLabelColor
-        let note = settingsLabel("账号密码仅保存在本机钥匙串", size: 11, color: .secondaryLabelColor)
         let spacer = NSView()
         let cancel = NSButton(title: "取消", target: self, action: #selector(cancel))
         cancel.bezelStyle = .rounded
-        let stack = NSStackView(views: [lockIcon, note, spacer, cancel, saveButton])
+        let stack = NSStackView(views: [spacer, cancel, saveButton])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 12, left: 24, bottom: 12, right: 24)
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 20, bottom: 8, right: 20)
         return stack
     }
 
@@ -444,22 +453,37 @@ private final class SettingsTabButton: NSButton {
         didSet { updateAppearance() }
     }
 
+    private let iconView: NSImageView
+    private let titleLabel: NSTextField
+
     init(title: String, symbolName: String) {
+        iconView = NSImageView(image: settingsSymbol(symbolName, pointSize: 18))
+        titleLabel = settingsLabel(title, size: 11)
         super.init(frame: .zero)
-        self.title = title
-        image = settingsSymbol(symbolName, pointSize: 19)
-        imagePosition = .imageAbove
-        imageScaling = .scaleProportionallyDown
-        alignment = .center
+        self.title = ""
         isBordered = false
         setButtonType(.momentaryPushIn)
-        wantsLayer = true
-        layer?.cornerRadius = 8
         translatesAutoresizingMaskIntoConstraints = false
+
+        iconView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 82),
-            heightAnchor.constraint(equalToConstant: 62)
+            iconView.widthAnchor.constraint(equalToConstant: 20),
+            iconView.heightAnchor.constraint(equalToConstant: 20)
         ])
+        let content = NSStackView(views: [iconView, titleLabel])
+        content.orientation = .vertical
+        content.alignment = .centerX
+        content.spacing = 2
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 60),
+            heightAnchor.constraint(equalToConstant: 48),
+            content.centerXAnchor.constraint(equalTo: centerXAnchor),
+            content.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+        setAccessibilityLabel(title)
         updateAppearance()
     }
 
@@ -472,21 +496,40 @@ private final class SettingsTabButton: NSButton {
         updateAppearance()
     }
 
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsDisplay = true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard isSelectedTab else { return }
+        let radius: CGFloat = 8
+        let fill = NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius)
+        NSColor.controlAccentColor.withAlphaComponent(0.10).setFill()
+        fill.fill()
+
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let lineWidth = 1 / scale
+        let border = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
+            xRadius: radius,
+            yRadius: radius
+        )
+        border.lineWidth = lineWidth
+        NSColor.separatorColor.withAlphaComponent(0.42).setStroke()
+        border.stroke()
+    }
+
     private func updateAppearance() {
         let color: NSColor = isSelectedTab ? .controlAccentColor : .secondaryLabelColor
-        contentTintColor = color
-        attributedTitle = NSAttributedString(
-            string: title,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 11, weight: isSelectedTab ? .semibold : .regular),
-                .foregroundColor: color
-            ]
-        )
-        layer?.backgroundColor = isSelectedTab
-            ? NSColor.controlAccentColor.withAlphaComponent(0.10).cgColor
-            : NSColor.clear.cgColor
-        layer?.borderWidth = isSelectedTab ? 0.5 : 0
-        layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.45).cgColor
+        iconView.contentTintColor = color
+        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: isSelectedTab ? .semibold : .regular)
+        titleLabel.textColor = color
+        needsDisplay = true
     }
 }
 

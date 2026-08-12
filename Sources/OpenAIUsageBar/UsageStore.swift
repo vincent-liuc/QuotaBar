@@ -186,9 +186,9 @@ enum PreferencesError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .emptyEmail:
-            return "接口账号不能为空"
+            return "登录账号不能为空"
         case .emptyPassword:
-            return "密码不能为空"
+            return "登录密码不能为空"
         }
     }
 }
