@@ -10,13 +10,9 @@
     </linearGradient>
   </defs>
   <rect x="24" y="24" width="976" height="976" rx="220" fill="url(#bg)"/>
-  <path fill="url(#cat)" d="M306 493C278 454 280 387 322 337L302 190L423 270C481 251 543 251 601 270L722 190L702 337C744 387 746 454 718 493C669 562 355 562 306 493Z"/>
-  <path fill="url(#cat)" d="M394 522C327 566 295 651 309 797H461L476 667H548L563 797H715C729 651 697 566 630 522C568 547 456 547 394 522Z"/>
-  <ellipse cx="388" cy="801" rx="91" ry="38" fill="#15c98a"/>
-  <ellipse cx="636" cy="801" rx="91" ry="38" fill="#15c98a"/>
-  <path fill="none" stroke="#25d69b" stroke-width="72" stroke-linecap="round" d="M679 704C763 620 809 793 887 683C922 634 904 580 860 568"/>
-  <ellipse cx="420" cy="405" rx="22" ry="32" fill="#101317"/>
-  <ellipse cx="604" cy="405" rx="22" ry="32" fill="#101317"/>
-  <path d="M486 462Q512 484 538 462Q512 522 486 462Z" fill="#101317"/>
-  <path fill="none" stroke="#101317" stroke-width="11" stroke-linecap="round" d="M357 468L254 449M363 489L260 500M667 468L770 449M661 489L764 500"/>
+  <path fill="url(#cat)" d="M188 798L229 333L152 166L350 285C446 244 578 244 674 285L872 166L795 333L836 798C720 884 304 884 188 798Z"/>
+  <ellipse cx="407" cy="505" rx="34" ry="47" fill="#101317"/>
+  <ellipse cx="617" cy="505" rx="34" ry="47" fill="#101317"/>
+  <path d="M468 591Q512 621 556 591Q512 673 468 591Z" fill="#101317"/>
+  <path fill="none" stroke="#101317" stroke-width="16" stroke-linecap="round" d="M364 592L174 565M369 628L183 652M660 592L850 565M655 628L841 652"/>
 </svg>

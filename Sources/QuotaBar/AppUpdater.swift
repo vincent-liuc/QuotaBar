@@ -32,7 +32,9 @@ struct SemanticVersion: Comparable, Equatable, Sendable {
 struct UpdateRelease: Equatable, Sendable {
     let version: String
     let downloadURL: URL
+    let downloadAPIURL: URL
     let checksumURL: URL
+    let checksumAPIURL: URL
     let fileName: String
     let releaseURL: URL
 }
@@ -77,10 +79,11 @@ enum AppUpdaterError: LocalizedError {
 struct GitHubRelease: Decodable, Sendable {
     struct Asset: Decodable, Sendable {
         let name: String
+        let url: URL
         let browserDownloadURL: URL
 
         enum CodingKeys: String, CodingKey {
-            case name
+            case name, url
             case browserDownloadURL = "browser_download_url"
         }
     }
@@ -121,7 +124,9 @@ enum ReleaseResolver {
         return .available(UpdateRelease(
             version: normalizedVersion,
             downloadURL: dmg.browserDownloadURL,
+            downloadAPIURL: dmg.url,
             checksumURL: checksum.browserDownloadURL,
+            checksumAPIURL: checksum.url,
             fileName: dmg.name,
             releaseURL: release.htmlURL
         ))
@@ -152,7 +157,7 @@ actor AppUpdater {
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         request.setValue("QuotaBar/\(currentVersion)", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await dataWithRetry(request)
         guard let response = response as? HTTPURLResponse else {
             throw AppUpdaterError.invalidResponse
         }
@@ -165,10 +170,9 @@ actor AppUpdater {
 
     func download(_ release: UpdateRelease) async throws -> URL {
         let expectedChecksum = try await fetchChecksum(for: release)
-        var request = URLRequest(url: release.downloadURL)
-        request.timeoutInterval = 120
-        request.setValue("QuotaBar/\(release.version)", forHTTPHeaderField: "User-Agent")
-        let (temporaryURL, response) = try await session.download(for: request)
+        var request = assetRequest(url: release.downloadAPIURL, version: release.version)
+        request.timeoutInterval = 600
+        let (temporaryURL, response) = try await downloadWithRetry(request)
         guard let response = response as? HTTPURLResponse else {
             throw AppUpdaterError.invalidResponse
         }
@@ -189,10 +193,9 @@ actor AppUpdater {
     }
 
     private func fetchChecksum(for release: UpdateRelease) async throws -> String {
-        var request = URLRequest(url: release.checksumURL)
+        var request = assetRequest(url: release.checksumAPIURL, version: release.version)
         request.timeoutInterval = 20
-        request.setValue("QuotaBar/\(release.version)", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await dataWithRetry(request)
         guard let response = response as? HTTPURLResponse else {
             throw AppUpdaterError.invalidResponse
         }
@@ -204,6 +207,58 @@ actor AppUpdater {
             throw AppUpdaterError.invalidResponse
         }
         return checksum.lowercased()
+    }
+
+    private func assetRequest(url: URL, version: String) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
+        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        request.setValue("QuotaBar/\(version)", forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
+    private func downloadWithRetry(_ request: URLRequest) async throws -> (URL, URLResponse) {
+        var resumeData: Data?
+        var lastError: Error?
+        for attempt in 0..<4 {
+            do {
+                if let resumeData {
+                    return try await session.download(resumeFrom: resumeData)
+                }
+                return try await session.download(for: request)
+            } catch {
+                lastError = error
+                guard attempt < 3, Self.isRetryable(error) else { throw error }
+                resumeData = (error as NSError).userInfo[NSURLSessionDownloadTaskResumeData] as? Data
+                try await Task.sleep(for: .seconds(attempt + 1))
+            }
+        }
+        throw lastError ?? AppUpdaterError.invalidResponse
+    }
+
+    private func dataWithRetry(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        var lastError: Error?
+        for attempt in 0..<3 {
+            do {
+                return try await session.data(for: request)
+            } catch {
+                lastError = error
+                guard attempt < 2, Self.isRetryable(error) else { throw error }
+                try await Task.sleep(for: .seconds(attempt + 1))
+            }
+        }
+        throw lastError ?? AppUpdaterError.invalidResponse
+    }
+
+    private static func isRetryable(_ error: Error) -> Bool {
+        let code = (error as? URLError)?.code
+        return code == .timedOut
+            || code == .networkConnectionLost
+            || code == .cannotConnectToHost
+            || code == .cannotFindHost
+            || code == .dnsLookupFailed
+            || code == .secureConnectionFailed
+            || code == .notConnectedToInternet
     }
 
     private func sha256(of fileURL: URL) throws -> String {

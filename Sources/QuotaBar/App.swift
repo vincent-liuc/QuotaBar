@@ -20,6 +20,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var store: UsageStore!
     private var contentController: UsagePopoverController!
     private var preferencesController: PreferencesWindowController?
+    private var statusAnimationTimer: Timer?
+    private var wavePhase = 0.0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDataMigration.migrateLegacyDefaultsIfNeeded()
@@ -41,6 +43,14 @@ final class AppController: NSObject, NSApplicationDelegate {
             self?.refreshUI()
         }
         refreshUI()
+        statusAnimationTimer = Timer.scheduledTimer(withTimeInterval: 0.28, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let progress = self.store.snapshot?.progress,
+                      progress > 0, progress < 1 else { return }
+                self.wavePhase += .pi / 5
+                self.refreshStatusIcon()
+            }
+        }
 
         if store.needsConfiguration {
             DispatchQueue.main.async { [weak self] in
@@ -75,14 +85,19 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func refreshUI() {
-        statusItem.button?.image = StatusRingRenderer.image(
-            progress: store.snapshot.flatMap { $0.hasWeeklyUsage ? $0.progress : nil },
-            phase: store.phase
-        )
+        refreshStatusIcon()
         statusItem.button?.setAccessibilityLabel(accessibilityLabel)
         if popover.isShown {
             contentController.refreshContent()
         }
+    }
+
+    private func refreshStatusIcon() {
+        statusItem.button?.image = StatusRingRenderer.image(
+            progress: store.snapshot.flatMap { $0.hasWeeklyUsage ? $0.progress : nil },
+            phase: store.phase,
+            wavePhase: wavePhase
+        )
     }
 
     private func showPreferences() {

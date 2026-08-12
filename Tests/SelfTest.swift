@@ -10,11 +10,13 @@ enum SelfTest {
         testPreferenceNormalization()
         try testStationProfiles()
         try testReleaseResolution()
+        try await testUpdateCheckRetry()
         try await testPaginationAndDeduplication()
         try await testOptionalEndpointDegradation()
         testLegacyDefaultsMigration()
         testStatusCatFill()
-        print("Self-test passed: 10 checks")
+        testWeeklyResetCalculation()
+        print("Self-test passed: 12 checks")
     }
 
     private static func testDecodesUsageHistory() throws {
@@ -168,6 +170,8 @@ enum SelfTest {
         let empty = bitmap(0)
         let ten = bitmap(0.1)
         let full = bitmap(1)
+        let waveA = StatusRingRenderer.image(progress: 0.5, phase: .ready, wavePhase: 0)
+        let waveB = StatusRingRenderer.image(progress: 0.5, phase: .ready, wavePhase: .pi / 2)
         let split = max(ten.pixelsHigh / 2, 1)
         require(greenPixels(empty, rows: 0..<empty.pixelsHigh) == 0, "zero usage cat remains black")
         require(greenPixels(ten, rows: 0..<ten.pixelsHigh) > 0, "ten percent cat has green fill")
@@ -176,6 +180,25 @@ enum SelfTest {
         require(tenBottom > tenTop, "ten percent green fill stays at cat bottom")
         require(greenPixels(full, rows: 0..<full.pixelsHigh) > greenPixels(ten, rows: 0..<ten.pixelsHigh), "full cat has more green fill")
         require(empty.colorAt(x: 0, y: 0)?.alphaComponent == 0, "status icon has no outer background")
+        require(waveA.tiffRepresentation != waveB.tiffRepresentation, "wave phase animates green surface")
+    }
+
+    private static func testWeeklyResetCalculation() {
+        let formatter = ISO8601DateFormatter()
+        let start = formatter.date(from: "2026-08-11T01:37:50Z")!
+        let beforeReset = formatter.date(from: "2026-08-12T08:00:00Z")!
+        let reset = WeeklyResetCalculator.nextReset(windowStart: start, expiresAt: nil, now: beforeReset)
+        require(reset == start.addingTimeInterval(7 * 86_400), "weekly reset follows seven-day window")
+
+        let afterFirstReset = formatter.date(from: "2026-08-19T08:00:00Z")!
+        let secondReset = WeeklyResetCalculator.nextReset(windowStart: start, expiresAt: nil, now: afterFirstReset)
+        require(secondReset == start.addingTimeInterval(14 * 86_400), "weekly reset advances across periods")
+
+        let expiry = start.addingTimeInterval(7 * 86_400)
+        require(
+            WeeklyResetCalculator.nextReset(windowStart: start, expiresAt: expiry, now: beforeReset) == nil,
+            "subscription expiry suppresses later weekly reset"
+        )
     }
 
     private static func testStationProfiles() throws {
@@ -212,15 +235,17 @@ enum SelfTest {
         require(SemanticVersion("v2.0")! == SemanticVersion("2.0.0")!, "semantic version normalization")
 
         let release = GitHubRelease(
-            tagName: "v1.10.0",
-            htmlURL: URL(string: "https://github.com/vincent-liuc/QuotaBar/releases/tag/v1.10.0")!,
+            tagName: "v1.11.0",
+            htmlURL: URL(string: "https://github.com/vincent-liuc/QuotaBar/releases/tag/v1.11.0")!,
             assets: [
                 .init(
-                    name: "QuotaBar-1.10.0-universal.dmg",
+                    name: "QuotaBar-1.11.0-universal.dmg",
+                    url: URL(string: "https://api.github.com/repos/vincent-liuc/QuotaBar/releases/assets/1")!,
                     browserDownloadURL: URL(string: "https://example.com/app.dmg")!
                 ),
                 .init(
-                    name: "QuotaBar-1.10.0-universal.dmg.sha256",
+                    name: "QuotaBar-1.11.0-universal.dmg.sha256",
+                    url: URL(string: "https://api.github.com/repos/vincent-liuc/QuotaBar/releases/assets/2")!,
                     browserDownloadURL: URL(string: "https://example.com/app.dmg.sha256")!
                 )
             ]
@@ -231,15 +256,42 @@ enum SelfTest {
         ) else {
             fatalError("Self-test failed: update release available")
         }
-        require(update.version == "1.10.0", "update version normalized")
+        require(update.version == "1.11.0", "update version normalized")
         require(update.fileName.hasSuffix("universal.dmg"), "universal DMG selected")
+        require(update.downloadAPIURL.host == "api.github.com", "asset API URL selected")
         guard case .upToDate(let latest) = try ReleaseResolver.resolve(
             release,
-            currentVersion: "1.10.0"
+            currentVersion: "1.11.0"
         ) else {
             fatalError("Self-test failed: up-to-date release")
         }
-        require(latest == "1.10.0", "latest version reported")
+        require(latest == "1.11.0", "latest version reported")
+    }
+
+    private static func testUpdateCheckRetry() async throws {
+        let attempts = LockedPages()
+        MockURLProtocol.requestHandler = { request in
+            attempts.append(1)
+            if attempts.values.count == 1 { throw URLError(.timedOut) }
+            let url = try requireURL(request)
+            require(request.value(forHTTPHeaderField: "Accept") == "application/vnd.github+json", "release accept header")
+            return mockResponse(
+                url: url,
+                json: #"{"tag_name":"v1.11.0","html_url":"https://github.com/vincent-liuc/QuotaBar/releases/tag/v1.11.0","assets":[]}"#
+            )
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let updater = AppUpdater(
+            session: URLSession(configuration: configuration),
+            latestReleaseURL: URL(string: "https://api.github.com/repos/vincent-liuc/QuotaBar/releases/latest")!
+        )
+        guard case .upToDate(let version) = try await updater.checkForUpdate(currentVersion: "1.11.0") else {
+            fatalError("Self-test failed: update check retry result")
+        }
+        require(version == "1.11.0", "update check succeeds after timeout retry")
+        require(attempts.values.count == 2, "update check retries transient timeout")
     }
 
     private static func testPaginationAndDeduplication() async throws {
@@ -261,7 +313,7 @@ enum SelfTest {
                 }
                 return mockResponse(
                     url: url,
-                    json: #"{"code":0,"message":"success","data":[{"id":10,"name":"Weekly","status":"active","weekly_usage_usd":52.71,"group":{"weekly_limit_usd":500}}]}"#
+                    json: #"{"code":0,"message":"success","data":[{"id":10,"name":"Weekly","status":"active","weekly_usage_usd":52.71,"weekly_window_start":"2026-08-11T09:37:50+08:00","expires_at":"2026-09-14T13:42:26+08:00","group":{"weekly_limit_usd":500}}]}"#
                 )
             }
             if url.path.hasSuffix("/api/v1/usage/dashboard/stats") {
@@ -345,13 +397,14 @@ enum SelfTest {
         require(usage.keys.first(where: { $0.id == 1 })?.concurrency == 2, "current concurrency retained")
         require(usage.weeklyUsage?.used == 52.71, "weekly usage decoded")
         require(usage.weeklyUsage?.total == 500, "nested weekly limit decoded")
+        require(usage.weeklyUsage?.resetAt != nil, "weekly reset derived from window start")
         require(usage.accountMetrics?.totalTokens == 137_630_389, "total tokens decoded")
         require(usage.accountMetrics?.totalActualCost == 106.38925756, "total actual cost decoded")
         require(usage.capabilities.contains(.apiKeyDailyUsage), "daily usage capability detected")
         require(usage.capabilities.contains(.usageHistory), "usage history capability detected")
         require(usage.usageRecords?.count == 12, "all fetched usage history retained in data layer")
         let snapshot = UsageSnapshot(weeklyUsage: usage.weeklyUsage, keys: usage.keys, usageRecords: usage.usageRecords)
-        require(snapshot.usageRecords?.count == 10, "dashboard usage history limited to 10")
+        require(snapshot.usageRecords?.count == 12, "dashboard retains fetched usage history for scrolling")
     }
 
     private static func testOptionalEndpointDegradation() async throws {

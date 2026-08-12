@@ -69,8 +69,8 @@ final class UsagePopoverController: NSViewController {
 
         refreshButton.image = symbol(store.isRefreshing ? "hourglass" : "arrow.clockwise")
         refreshButton.isEnabled = !store.isRefreshing
-        settingsButton.image = symbol("gearshape")
-        settingsButton.toolTip = "偏好设置"
+        settingsButton.image = symbol("list.bullet", pointSize: 14)
+        settingsButton.toolTip = "菜单"
         headerUpdatedLabel.stringValue = store.snapshot.map {
             "更新于 \(timeFormatter.string(from: $0.fetchedAt))"
         } ?? ""
@@ -87,9 +87,9 @@ final class UsagePopoverController: NSViewController {
         refreshButton.target = self
         refreshButton.action = #selector(refresh)
 
-        configureIconButton(settingsButton, symbolName: "gearshape", toolTip: "偏好设置")
+        configureIconButton(settingsButton, symbolName: "list.bullet", toolTip: "菜单")
         settingsButton.target = self
-        settingsButton.action = #selector(openPreferences)
+        settingsButton.action = #selector(showApplicationMenu)
 
         let actions = NSStackView(views: [refreshButton, settingsButton])
         actions.orientation = .horizontal
@@ -116,6 +116,24 @@ final class UsagePopoverController: NSViewController {
 
     @objc private func openPreferences() {
         showPreferences()
+    }
+
+    @objc private func showApplicationMenu() {
+        let menu = NSMenu()
+        let settings = NSMenuItem(title: "设置", action: #selector(openPreferences), keyEquivalent: ",")
+        settings.image = symbol("gearshape", pointSize: 13)
+        settings.target = self
+        menu.addItem(settings)
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "退出 QuotaBar", action: #selector(quitApplication), keyEquivalent: "q")
+        quit.image = symbol("power", pointSize: 13)
+        quit.target = self
+        menu.addItem(quit)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: settingsButton.bounds.minY - 2), in: settingsButton)
+    }
+
+    @objc private func quitApplication() {
+        NSApplication.shared.terminate(nil)
     }
 }
 
@@ -165,6 +183,15 @@ private final class UsageContentView: NSView {
             ring.widthAnchor.constraint(equalToConstant: 82),
             ring.heightAnchor.constraint(equalToConstant: 82)
         ])
+        let reset = label(weeklyResetTitle(snapshot.weeklyUsage?.resetAt), size: 9, color: .tertiaryLabelColor)
+        reset.alignment = .center
+        reset.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        reset.toolTip = snapshot.weeklyUsage?.resetAt.map { "下次周额度重置：\(resetDateFormatter.string(from: $0))" }
+        reset.widthAnchor.constraint(equalToConstant: 82).isActive = true
+        let ringGroup = NSStackView(views: [ring, reset])
+        ringGroup.orientation = .vertical
+        ringGroup.alignment = .centerX
+        ringGroup.spacing = 1
 
         let metrics = NSStackView(views: [
             metricRow("每周总量", value: snapshot.total, emphasized: false),
@@ -175,7 +202,7 @@ private final class UsageContentView: NSView {
         metrics.alignment = .leading
         metrics.spacing = 9
 
-        let row = NSStackView(views: [ring, metrics])
+        let row = NSStackView(views: [ringGroup, metrics])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 13
@@ -839,6 +866,24 @@ private func usageDate(_ date: Date, timezone: String) -> String {
     formatter.dateFormat = "MM-dd HH:mm:ss"
     return formatter.string(from: date)
 }
+
+private func weeklyResetTitle(_ resetAt: Date?, now: Date = Date()) -> String {
+    guard let resetAt else { return "" }
+    let remaining = max(Int(resetAt.timeIntervalSince(now)), 0)
+    let days = remaining / 86_400
+    let hours = (remaining % 86_400) / 3_600
+    if days > 0 { return "\(days)天\(hours)小时后重置" }
+    let minutes = max((remaining % 3_600) / 60, 1)
+    if hours > 0 { return "\(hours)小时\(minutes)分钟后重置" }
+    return "\(minutes)分钟后重置"
+}
+
+private let resetDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "zh_CN")
+    formatter.dateFormat = "yyyy-MM-dd HH:mm"
+    return formatter
+}()
 
 private func compactTokenCount(_ value: Int64) -> String {
     switch value {

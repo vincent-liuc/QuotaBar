@@ -157,7 +157,14 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
             subscription = subscriptions.first { $0.id == id && $0.status == "active" }
         }
         guard let subscription, let total = subscription.weeklyLimitUSD else { return nil }
-        return WeeklyUsage(used: max(subscription.weeklyUsageUSD ?? 0, 0), total: max(total, 0))
+        return WeeklyUsage(
+            used: max(subscription.weeklyUsageUSD ?? 0, 0),
+            total: max(total, 0),
+            resetAt: WeeklyResetCalculator.nextReset(
+                windowStart: subscription.weeklyWindowStart,
+                expiresAt: subscription.expiresAt
+            )
+        )
     }
 
     private func validToken(profile: StationProfile, credentials: Credentials) async throws -> String {
@@ -311,6 +318,23 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
     ) async -> URLRequest? {
         guard task.currentRequest?.url?.origin == request.url?.origin else { return nil }
         return request
+    }
+}
+
+enum WeeklyResetCalculator {
+    static let period: TimeInterval = 7 * 24 * 60 * 60
+
+    static func nextReset(
+        windowStart: Date?,
+        expiresAt: Date?,
+        now: Date = Date()
+    ) -> Date? {
+        guard let windowStart else { return nil }
+        let elapsed = max(now.timeIntervalSince(windowStart), 0)
+        let completedPeriods = floor(elapsed / period)
+        let candidate = windowStart.addingTimeInterval((completedPeriods + 1) * period)
+        if let expiresAt, candidate >= expiresAt { return nil }
+        return candidate
     }
 }
 

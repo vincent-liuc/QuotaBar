@@ -125,12 +125,16 @@ struct SubscriptionRecord: Decodable, Sendable {
     let name: String?
     let weeklyUsageUSD: Double?
     let directWeeklyLimitUSD: Double?
+    let weeklyWindowStart: Date?
+    let expiresAt: Date?
     let group: SubscriptionGroup?
 
     enum CodingKeys: String, CodingKey {
         case id, status, group, name
         case weeklyUsageUSD = "weekly_usage_usd"
         case directWeeklyLimitUSD = "weekly_limit_usd"
+        case weeklyWindowStart = "weekly_window_start"
+        case expiresAt = "expires_at"
     }
 
     var weeklyLimitUSD: Double? { directWeeklyLimitUSD ?? group?.weeklyLimitUSD }
@@ -139,6 +143,13 @@ struct SubscriptionRecord: Decodable, Sendable {
 struct WeeklyUsage: Equatable, Sendable {
     let used: Double
     let total: Double
+    let resetAt: Date?
+
+    init(used: Double, total: Double, resetAt: Date? = nil) {
+        self.used = used
+        self.total = total
+        self.resetAt = resetAt
+    }
 }
 
 struct AccountMetrics: Equatable, Sendable {
@@ -183,7 +194,7 @@ struct UsageKey: Decodable, Equatable, Sendable {
 }
 
 struct UsageSnapshot: Equatable, Sendable {
-    static let maximumUsageRecords = 10
+    static let maximumUsageRecords = 50
 
     let keys: [UsageKey]
     let usageRecords: [UsageRecord]?
