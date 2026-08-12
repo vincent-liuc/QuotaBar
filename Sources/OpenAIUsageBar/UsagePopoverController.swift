@@ -97,7 +97,7 @@ final class UsagePopoverController: NSViewController {
             headerIcon.heightAnchor.constraint(equalToConstant: 20)
         ])
 
-        let title = label("OpenAI用量", size: 13, weight: .semibold)
+        let title = label("Dashboard", size: 13, weight: .semibold)
         title.setContentHuggingPriority(.required, for: .horizontal)
 
         configureIconButton(refreshButton, symbolName: "arrow.clockwise", toolTip: "立即刷新")
@@ -216,12 +216,12 @@ private final class UsageContentView: NSView {
         sections.orientation = .vertical
         sections.alignment = .leading
         sections.spacing = 0
-        sections.addArrangedSubview(makeUsageRow(snapshot))
 
         if preferences.showMetricCards {
-            sections.addArrangedSubview(sectionSeparator())
             sections.addArrangedSubview(makeMetricCards(snapshot.accountMetrics))
+            sections.addArrangedSubview(sectionSeparator())
         }
+        sections.addArrangedSubview(makeUsageRow(snapshot))
         if preferences.showAPIKeyDetails {
             sections.addArrangedSubview(sectionSeparator())
             sections.addArrangedSubview(makeKeyDetails(snapshot.keys))
@@ -327,16 +327,15 @@ private final class UsageContentView: NSView {
     }
 
     private func makeKeyRow(_ key: UsageKey) -> NSView {
-        let concurrency: NSTextField
+        let leadingViews: [NSView]
         if key.concurrency > 0 {
-            concurrency = label("● \(key.concurrency)", size: 10, weight: .medium, color: .systemGreen)
+            let concurrency = label("● \(key.concurrency)", size: 10, weight: .medium, color: .systemGreen)
             concurrency.toolTip = "当前并发 \(key.concurrency)"
+            concurrency.setContentCompressionResistancePriority(.required, for: .horizontal)
+            leadingViews = [concurrency]
         } else {
-            concurrency = label("", size: 10)
+            leadingViews = []
         }
-        concurrency.alignment = .left
-        concurrency.widthAnchor.constraint(equalToConstant: 24).isActive = true
-        concurrency.setContentCompressionResistancePriority(.required, for: .horizontal)
         let name = label(key.name, size: 11, weight: .medium)
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let value = label("今日 \(currency(key.todayActualCost))",
@@ -345,7 +344,7 @@ private final class UsageContentView: NSView {
         value.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         value.setContentCompressionResistancePriority(.required, for: .horizontal)
         let spacer = NSView()
-        let top = NSStackView(views: [concurrency, name, spacer, value])
+        let top = NSStackView(views: [name] + leadingViews + [spacer, value])
         top.orientation = .horizontal
         top.alignment = .firstBaseline
         top.spacing = 6
@@ -359,29 +358,49 @@ private final class UsageContentView: NSView {
     }
 
     private func panel(_ content: NSView) -> NSView {
+        let wrapper = NSView()
+        wrapper.wantsLayer = true
+        wrapper.layer?.shadowColor = NSColor.black.cgColor
+        wrapper.layer?.shadowOpacity = 0.12
+        wrapper.layer?.shadowRadius = 3
+        wrapper.layer?.shadowOffset = NSSize(width: 0, height: -1)
+
         let effect = NSVisualEffectView()
-        effect.material = .contentBackground
+        effect.material = .sidebar
         effect.blendingMode = .withinWindow
         effect.state = .active
         effect.wantsLayer = true
         effect.layer?.cornerRadius = 11
+        effect.layer?.masksToBounds = true
         effect.layer?.borderWidth = 0.5
-        effect.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.46).cgColor
-        effect.shadow = NSShadow()
-        effect.layer?.shadowColor = NSColor.black.cgColor
-        effect.layer?.shadowOpacity = 0.09
-        effect.layer?.shadowRadius = 2
-        effect.layer?.shadowOffset = NSSize(width: 0, height: -1)
+        effect.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.42).cgColor
+        effect.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(effect)
+
+        let tint = NSView()
+        tint.wantsLayer = true
+        tint.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.24).cgColor
+        tint.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(tint)
+
         content.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(content)
         NSLayoutConstraint.activate([
-            effect.widthAnchor.constraint(equalToConstant: 316),
+            wrapper.widthAnchor.constraint(equalToConstant: 316),
+            effect.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            effect.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            effect.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            effect.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
+            tint.topAnchor.constraint(equalTo: effect.topAnchor),
+            tint.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
+            tint.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
+            tint.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
             content.topAnchor.constraint(equalTo: effect.topAnchor, constant: 12),
             content.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 15),
             content.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -15),
             content.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -12)
         ])
-        return effect
+        return wrapper
     }
 
     private func metricTile(_ content: NSView) -> NSView {
