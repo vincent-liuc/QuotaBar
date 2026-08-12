@@ -10,8 +10,10 @@
 ## 功能
 
 - 菜单栏环形图展示每周已用额度 / 每周总额度
-- 弹窗展示订阅合计及每个启用 API Key 的当日用量
+- 毛玻璃弹窗展示订阅合计、累计 Token 与累计消费金额
+- 展示每个启用 API Key 的当日用量；有请求运行时同步显示当前并发
 - API Key 按当日实际用量从高到低排列
+- 可在设置中分别隐藏累计指标卡片和 API Key 明细
 - 刷新频率可设置为 5-3600 秒
 - 账号和密码保存在 macOS 钥匙串
 - 支持使用 macOS 原生登录项开机启动
@@ -28,7 +30,8 @@ https://sub2apis.ruobin.dev
 用户在设置中填写的是该后端的账号和密码，不应填写 OpenAI、ChatGPT 或其他服务的账号密码。登录时，凭据会通过 HTTPS 发送到该后端的 `/api/v1/auth/login`；随后应用使用短期访问令牌读取：
 
 - `/api/v1/subscriptions?timezone=Asia/Shanghai`：每周已用额度和每周总额度
-- `/api/v1/keys`：API Key 名称和启用状态
+- `/api/v1/keys`：API Key 名称、启用状态和当前并发
+- `/api/v1/usage/dashboard/stats`：累计 Token 和累计实际消费金额
 - `/api/v1/usage/dashboard/api-keys-usage`：启用 API Key 的当日实际用量
 
 macOS 版本将账号和密码保存在系统钥匙串，不写入源码或 `UserDefaults`；访问令牌仅保存在应用进程内存中。源码没有集成额外的分析或遥测服务。

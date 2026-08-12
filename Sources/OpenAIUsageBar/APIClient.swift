@@ -48,6 +48,7 @@ actor APIClient: UsageFetching {
 
     private func fetchUsage(token: String) async throws -> UsageData {
         async let weeklyUsage = fetchWeeklyUsage(token: token)
+        async let accountMetrics = fetchAccountMetrics(token: token)
         let keys = try await fetchAllKeys(token: token).filter(\.isActive)
         let usageByKeyID = try await fetchTodayUsage(token: token, keyIDs: keys.map(\.id))
         let keysWithTodayUsage = keys.map { key in
@@ -55,7 +56,11 @@ actor APIClient: UsageFetching {
             updated.todayActualCost = usageByKeyID[key.id] ?? 0
             return updated
         }
-        return try await UsageData(weeklyUsage: weeklyUsage, keys: keysWithTodayUsage)
+        return try await UsageData(
+            weeklyUsage: weeklyUsage,
+            accountMetrics: accountMetrics,
+            keys: keysWithTodayUsage
+        )
     }
 
     private func validToken(credentials: Credentials) async throws -> String {
@@ -191,6 +196,19 @@ actor APIClient: UsageFetching {
             usageByKeyID[stat.apiKeyID] = max(stat.todayActualCost, 0)
         }
         return usageByKeyID
+    }
+
+    private func fetchAccountMetrics(token: String) async throws -> AccountMetrics {
+        var request = URLRequest(
+            url: baseURL.appending(path: "/api/v1/usage/dashboard/stats")
+        )
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let envelope: APIEnvelope<DashboardStats> = try await send(request)
+        return AccountMetrics(
+            totalTokens: max(envelope.data.totalTokens, 0),
+            totalActualCost: max(envelope.data.totalActualCost, 0)
+        )
     }
 
     private func send<Value: Decodable>(_ request: URLRequest) async throws -> APIEnvelope<Value> {

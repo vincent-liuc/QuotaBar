@@ -7,10 +7,19 @@ struct UserPreferences: Equatable, Sendable {
 
     let refreshInterval: TimeInterval
     let launchAtLogin: Bool
+    let showAPIKeyDetails: Bool
+    let showMetricCards: Bool
 
-    init(refreshInterval: TimeInterval, launchAtLogin: Bool) {
+    init(
+        refreshInterval: TimeInterval,
+        launchAtLogin: Bool,
+        showAPIKeyDetails: Bool = true,
+        showMetricCards: Bool = true
+    ) {
         self.refreshInterval = Self.normalizedRefreshInterval(refreshInterval)
         self.launchAtLogin = launchAtLogin
+        self.showAPIKeyDetails = showAPIKeyDetails
+        self.showMetricCards = showMetricCards
     }
 
     static func normalizedRefreshInterval(_ value: TimeInterval) -> TimeInterval {
@@ -26,6 +35,8 @@ final class PreferencesStore: @unchecked Sendable {
         static let legacyKeyName = "apiKeyName"
         static let refreshInterval = "refreshInterval"
         static let launchAtLogin = "launchAtLogin"
+        static let showAPIKeyDetails = "showAPIKeyDetails"
+        static let showMetricCards = "showMetricCards"
         static let launchRegistrationVersion = "launchRegistrationVersion"
     }
 
@@ -43,10 +54,18 @@ final class PreferencesStore: @unchecked Sendable {
         let launchAtLogin = defaults.object(forKey: Key.launchAtLogin) == nil
             ? true
             : defaults.bool(forKey: Key.launchAtLogin)
+        let showAPIKeyDetails = defaults.object(forKey: Key.showAPIKeyDetails) == nil
+            ? true
+            : defaults.bool(forKey: Key.showAPIKeyDetails)
+        let showMetricCards = defaults.object(forKey: Key.showMetricCards) == nil
+            ? true
+            : defaults.bool(forKey: Key.showMetricCards)
 
         return UserPreferences(
             refreshInterval: refreshInterval,
-            launchAtLogin: launchAtLogin
+            launchAtLogin: launchAtLogin,
+            showAPIKeyDetails: showAPIKeyDetails,
+            showMetricCards: showMetricCards
         )
     }
 
@@ -54,6 +73,8 @@ final class PreferencesStore: @unchecked Sendable {
         defaults.removeObject(forKey: Key.legacyKeyName)
         defaults.set(preferences.refreshInterval, forKey: Key.refreshInterval)
         defaults.set(preferences.launchAtLogin, forKey: Key.launchAtLogin)
+        defaults.set(preferences.showAPIKeyDetails, forKey: Key.showAPIKeyDetails)
+        defaults.set(preferences.showMetricCards, forKey: Key.showMetricCards)
     }
 
     var launchRegistrationNeedsRefresh: Bool {

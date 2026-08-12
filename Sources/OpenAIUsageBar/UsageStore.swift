@@ -56,7 +56,9 @@ final class UsageStore {
         email: String,
         password: String,
         refreshInterval: TimeInterval,
-        launchAtLogin: Bool
+        launchAtLogin: Bool,
+        showAPIKeyDetails: Bool,
+        showMetricCards: Bool
     ) async throws {
         let value = Credentials(
             email: email.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -64,7 +66,9 @@ final class UsageStore {
         )
         let updatedPreferences = UserPreferences(
             refreshInterval: refreshInterval,
-            launchAtLogin: launchAtLogin
+            launchAtLogin: launchAtLogin,
+            showAPIKeyDetails: showAPIKeyDetails,
+            showMetricCards: showMetricCards
         )
         guard !value.email.isEmpty else { throw PreferencesError.emptyEmail }
         guard !value.password.isEmpty else { throw PreferencesError.emptyPassword }
@@ -112,6 +116,7 @@ final class UsageStore {
             let usage = try await client.fetchUsage(credentials: credentials)
             snapshot = UsageSnapshot(
                 weeklyUsage: usage.weeklyUsage,
+                accountMetrics: usage.accountMetrics,
                 keys: usage.keys
             )
             phase = .ready

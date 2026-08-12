@@ -7,7 +7,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate {
     init(store: UsageStore) {
         preferencesController = PreferencesViewController(store: store)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 440, height: 382),
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 470),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -47,6 +47,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let refreshField = NSTextField()
     private let refreshStepper = NSStepper()
     private let launchAtLoginSwitch = NSButton()
+    private let showAPIKeyDetailsSwitch = NSButton()
+    private let showMetricCardsSwitch = NSButton()
     private let launchStatusLabel = settingsLabel("", size: 11, color: .secondaryLabelColor)
     private let messageLabel = settingsLabel("", size: 11, color: .systemRed)
     private let saveButton = NSButton(title: "保存", target: nil, action: nil)
@@ -79,7 +81,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
         NSLayoutConstraint.activate([
             root.widthAnchor.constraint(equalToConstant: 440),
-            root.heightAnchor.constraint(equalToConstant: 382),
+            root.heightAnchor.constraint(equalToConstant: 470),
 
             header.topAnchor.constraint(equalTo: root.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
@@ -115,6 +117,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         passwordField.stringValue = credentials?.password ?? ""
         refreshField.integerValue = Int(store.preferences.refreshInterval)
         launchAtLoginSwitch.state = store.preferences.launchAtLogin ? .on : .off
+        showAPIKeyDetailsSwitch.state = store.preferences.showAPIKeyDetails ? .on : .off
+        showMetricCardsSwitch.state = store.preferences.showMetricCards ? .on : .off
 
         configureTextField(emailField, placeholder: "name@example.com")
         configureTextField(passwordField, placeholder: "输入接口密码")
@@ -133,6 +137,12 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         launchAtLoginSwitch.setButtonType(.switch)
         launchAtLoginSwitch.title = "开机自动启动"
         launchAtLoginSwitch.font = NSFont.systemFont(ofSize: 12)
+        showAPIKeyDetailsSwitch.setButtonType(.switch)
+        showAPIKeyDetailsSwitch.title = "显示 API Key 明细"
+        showAPIKeyDetailsSwitch.font = NSFont.systemFont(ofSize: 12)
+        showMetricCardsSwitch.setButtonType(.switch)
+        showMetricCardsSwitch.title = "显示累计指标卡片"
+        showMetricCardsSwitch.font = NSFont.systemFont(ofSize: 12)
         launchStatusLabel.stringValue = store.launchAtLoginStatus
 
         emailField.delegate = self
@@ -155,7 +165,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         ])
 
         let title = settingsLabel("偏好设置", size: 16, weight: .semibold)
-        let subtitle = settingsLabel("管理账号、刷新频率与启动方式", size: 11, color: .secondaryLabelColor)
+        let subtitle = settingsLabel("管理账号、刷新与 Popover 显示", size: 11, color: .secondaryLabelColor)
         let text = NSStackView(views: [title, subtitle])
         text.orientation = .vertical
         text.alignment = .leading
@@ -200,6 +210,12 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         ])
         configureGrid(syncGrid)
 
+        let displayTitle = settingsLabel("Popover 显示", size: 12, weight: .semibold)
+        let displayOptions = NSStackView(views: [showAPIKeyDetailsSwitch, showMetricCardsSwitch])
+        displayOptions.orientation = .vertical
+        displayOptions.alignment = .leading
+        displayOptions.spacing = 8
+
         messageLabel.maximumNumberOfLines = 2
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.isHidden = true
@@ -210,6 +226,9 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             settingsSeparator(),
             syncTitle,
             syncGrid,
+            settingsSeparator(),
+            displayTitle,
+            displayOptions,
             messageLabel
         ])
         stack.orientation = .vertical
@@ -219,6 +238,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         accountGrid.widthAnchor.constraint(equalToConstant: 392).isActive = true
         syncGrid.widthAnchor.constraint(equalToConstant: 392).isActive = true
         stack.arrangedSubviews[2].widthAnchor.constraint(equalToConstant: 392).isActive = true
+        stack.arrangedSubviews[5].widthAnchor.constraint(equalToConstant: 392).isActive = true
         messageLabel.widthAnchor.constraint(equalToConstant: 392).isActive = true
         return stack
     }
@@ -280,7 +300,9 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
                     email: emailField.stringValue,
                     password: passwordField.stringValue,
                     refreshInterval: UserPreferences.normalizedRefreshInterval(refreshField.doubleValue),
-                    launchAtLogin: launchAtLoginSwitch.state == .on
+                    launchAtLogin: launchAtLoginSwitch.state == .on,
+                    showAPIKeyDetails: showAPIKeyDetailsSwitch.state == .on,
+                    showMetricCards: showMetricCardsSwitch.state == .on
                 )
                 onSaved?()
             } catch {

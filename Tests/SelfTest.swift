@@ -22,6 +22,7 @@ enum SelfTest {
               "status": "active",
               "quota": 400,
               "quota_used": 22.3713036,
+              "current_concurrency": 3,
               "updated_at": "2026-08-11T10:31:58.067319+08:00"
             }],
             "total": 1,
@@ -38,6 +39,7 @@ enum SelfTest {
         require(result.code == 0, "response code")
         require(result.data.items.first?.quota == 400, "quota")
         require(result.data.items.first?.quotaUsed == 22.3713036, "quota_used")
+        require(result.data.items.first?.concurrency == 3, "current_concurrency")
         require(result.data.items.first?.updatedAt != nil, "updated_at")
         require(result.data.page == 1, "page")
         require(result.data.pageSize == 100, "page_size")
@@ -83,9 +85,23 @@ enum SelfTest {
 
         let preferences = UserPreferences(
             refreshInterval: 30,
-            launchAtLogin: true
+            launchAtLogin: true,
+            showAPIKeyDetails: false,
+            showMetricCards: false
         )
         require(preferences.launchAtLogin, "launch-at-login preference")
+        require(!preferences.showAPIKeyDetails, "API key details preference")
+        require(!preferences.showMetricCards, "metric cards preference")
+
+        let suiteName = "dev.ruobin.OpenAIUsageBar.SelfTest.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = PreferencesStore(defaults: defaults)
+        let initial = store.load()
+        require(initial.showAPIKeyDetails, "API key details default enabled")
+        require(initial.showMetricCards, "metric cards default enabled")
+        store.save(preferences)
+        require(store.load() == preferences, "display preferences persisted")
     }
 
     private static func testPaginationAndDeduplication() async throws {
@@ -110,6 +126,12 @@ enum SelfTest {
                     json: #"{"code":0,"message":"success","data":[{"status":"active","weekly_usage_usd":52.71,"group":{"weekly_limit_usd":500}}]}"#
                 )
             }
+            if url.path == "/api/v1/usage/dashboard/stats" {
+                return mockResponse(
+                    url: url,
+                    json: #"{"code":0,"message":"success","data":{"total_tokens":137630389,"total_actual_cost":106.38925756}}"#
+                )
+            }
             if url.path == "/api/v1/usage/dashboard/api-keys-usage" {
                 guard request.httpMethod == "POST" else {
                     throw APIClientError.invalidResponse
@@ -132,7 +154,7 @@ enum SelfTest {
                     json: keyPageJSON(
                         page: 1,
                         items: [
-                            #"{"id":1,"name":"One","status":"active","quota":100,"quota_used":10}"#,
+                            #"{"id":1,"name":"One","status":"active","quota":100,"quota_used":10,"current_concurrency":2}"#,
                             #"{"id":2,"name":"Two","status":"active","quota":200,"quota_used":20}"#
                         ]
                     )
@@ -163,8 +185,11 @@ enum SelfTest {
         require(usage.keys.map(\.id) == [1, 2], "inactive keys excluded")
         require(usage.keys.first(where: { $0.id == 2 })?.quotaUsed == 25, "duplicate key refreshed")
         require(usage.keys.first(where: { $0.id == 2 })?.todayActualCost == 8.5, "today usage merged by key id")
+        require(usage.keys.first(where: { $0.id == 1 })?.concurrency == 2, "current concurrency retained")
         require(usage.weeklyUsage.used == 52.71, "weekly usage decoded")
         require(usage.weeklyUsage.total == 500, "nested weekly limit decoded")
+        require(usage.accountMetrics.totalTokens == 137_630_389, "total tokens decoded")
+        require(usage.accountMetrics.totalActualCost == 106.38925756, "total actual cost decoded")
     }
 
     private static func keyPageJSON(page: Int, items: [String]) -> String {

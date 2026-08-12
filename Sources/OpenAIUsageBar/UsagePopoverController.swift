@@ -22,28 +22,28 @@ final class UsagePopoverController: NSViewController {
     }
 
     override func loadView() {
-        let root = NSView()
+        let root = NSVisualEffectView()
+        root.material = .popover
+        root.blendingMode = .behindWindow
+        root.state = .active
+        root.wantsLayer = true
+        root.layer?.cornerRadius = 12
         root.translatesAutoresizingMaskIntoConstraints = false
 
         let header = makeHeader()
-        let divider = NSBox()
-        divider.boxType = .separator
 
-        [header, divider, bodyContainer].forEach {
+        [header, bodyContainer].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview($0)
         }
 
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: 326),
+            root.widthAnchor.constraint(equalToConstant: 332),
             header.topAnchor.constraint(equalTo: root.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 48),
-            divider.topAnchor.constraint(equalTo: header.bottomAnchor),
-            divider.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            bodyContainer.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            header.heightAnchor.constraint(equalToConstant: 44),
+            bodyContainer.topAnchor.constraint(equalTo: header.bottomAnchor),
             bodyContainer.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             bodyContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             bodyContainer.bottomAnchor.constraint(equalTo: root.bottomAnchor)
@@ -82,7 +82,7 @@ final class UsagePopoverController: NSViewController {
 
         nextBody.layoutSubtreeIfNeeded()
         let bodyHeight = nextBody.fittingSize.height
-        preferredContentSize = NSSize(width: 326, height: max(bodyHeight + 49, 150))
+        preferredContentSize = NSSize(width: 332, height: max(bodyHeight + 44, 150))
     }
 
     private func makeHeader() -> NSView {
@@ -113,17 +113,17 @@ final class UsagePopoverController: NSViewController {
         actions.alignment = .centerY
         actions.spacing = 2
 
-        headerUpdatedLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        headerUpdatedLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
         headerUpdatedLabel.textColor = .secondaryLabelColor
         headerUpdatedLabel.lineBreakMode = .byClipping
         headerUpdatedLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let spacer = NSView()
-        let stack = NSStackView(views: [headerIcon, title, actions, spacer, headerUpdatedLabel])
+        let stack = NSStackView(views: [headerIcon, title, spacer, headerUpdatedLabel, actions])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 16, bottom: 0, right: 12)
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 7)
         return stack
     }
 
@@ -144,8 +144,8 @@ private final class UsageContentView: NSView {
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .leading
-        content.spacing = 14
-        content.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 13, right: 16)
+        content.spacing = 0
+        content.edgeInsets = NSEdgeInsets(top: 0, left: 8, bottom: 8, right: 8)
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
 
@@ -157,16 +157,13 @@ private final class UsageContentView: NSView {
         ])
 
         if let snapshot = store.snapshot {
-            content.addArrangedSubview(makeUsageRow(snapshot))
-            content.addArrangedSubview(separator())
-            let keyDetails = makeKeyDetails(snapshot.keys)
-            content.addArrangedSubview(keyDetails)
+            content.addArrangedSubview(makeDashboardPanel(snapshot, preferences: store.preferences))
         } else if store.phase == .loading {
             content.addArrangedSubview(makeLoadingView())
         }
 
         if case .failed(let message) = store.phase {
-            content.addArrangedSubview(makeErrorView(message))
+            content.addArrangedSubview(panel(makeErrorView(message)))
         }
     }
 
@@ -178,8 +175,8 @@ private final class UsageContentView: NSView {
         let ring = LargeUsageRingView(snapshot: snapshot)
         ring.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            ring.widthAnchor.constraint(equalToConstant: 92),
-            ring.heightAnchor.constraint(equalToConstant: 92)
+            ring.widthAnchor.constraint(equalToConstant: 82),
+            ring.heightAnchor.constraint(equalToConstant: 82)
         ])
 
         let metrics = NSStackView(views: [
@@ -194,8 +191,8 @@ private final class UsageContentView: NSView {
         let row = NSStackView(views: [ring, metrics])
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 18
-        row.widthAnchor.constraint(equalToConstant: 294).isActive = true
+        row.spacing = 13
+        row.widthAnchor.constraint(equalToConstant: 286).isActive = true
         return row
     }
 
@@ -210,8 +207,72 @@ private final class UsageContentView: NSView {
         let row = NSStackView(views: [titleLabel, spacer, valueLabel])
         row.orientation = .horizontal
         row.alignment = .firstBaseline
-        row.widthAnchor.constraint(equalToConstant: 184).isActive = true
+        row.widthAnchor.constraint(equalToConstant: 191).isActive = true
         return row
+    }
+
+    private func makeDashboardPanel(_ snapshot: UsageSnapshot, preferences: UserPreferences) -> NSView {
+        let sections = NSStackView()
+        sections.orientation = .vertical
+        sections.alignment = .leading
+        sections.spacing = 0
+        sections.addArrangedSubview(makeUsageRow(snapshot))
+
+        if preferences.showMetricCards {
+            sections.addArrangedSubview(sectionSeparator())
+            sections.addArrangedSubview(makeMetricCards(snapshot.accountMetrics))
+        }
+        if preferences.showAPIKeyDetails {
+            sections.addArrangedSubview(sectionSeparator())
+            sections.addArrangedSubview(makeKeyDetails(snapshot.keys))
+        }
+        return panel(sections)
+    }
+
+    private func makeMetricCards(_ metrics: AccountMetrics) -> NSView {
+        let tokens = metricCard(
+            title: "累计 Token",
+            value: compactTokenCount(metrics.totalTokens),
+            symbolName: "sum",
+            tint: .systemIndigo
+        )
+        let cost = metricCard(
+            title: "消费金额",
+            value: currency(metrics.totalActualCost),
+            symbolName: "dollarsign.circle.fill",
+            tint: .systemGreen
+        )
+        let row = NSStackView(views: [tokens, cost])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fillEqually
+        row.spacing = 10
+        row.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        return row
+    }
+
+    private func metricCard(title: String, value: String, symbolName: String, tint: NSColor) -> NSView {
+        let icon = NSImageView(image: symbol(symbolName, pointSize: 13))
+        icon.contentTintColor = tint
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 18),
+            icon.heightAnchor.constraint(equalToConstant: 18)
+        ])
+
+        let titleLabel = label(title, size: 10, color: .secondaryLabelColor)
+        let valueLabel = label(value, size: 15, weight: .semibold)
+        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        let text = NSStackView(views: [titleLabel, valueLabel])
+        text.orientation = .vertical
+        text.alignment = .leading
+        text.spacing = 3
+
+        let content = NSStackView(views: [icon, text])
+        content.orientation = .horizontal
+        content.alignment = .centerY
+        content.spacing = 9
+        return metricTile(content)
     }
 
     private func makeKeyDetails(_ keys: [UsageKey]) -> NSView {
@@ -224,7 +285,7 @@ private final class UsageContentView: NSView {
         if keys.isEmpty {
             let empty = label("暂无 API Key", size: 11, color: .secondaryLabelColor)
             empty.alignment = .center
-            empty.widthAnchor.constraint(equalToConstant: 294).isActive = true
+            empty.widthAnchor.constraint(equalToConstant: 286).isActive = true
             empty.heightAnchor.constraint(equalToConstant: 48).isActive = true
             stack.addArrangedSubview(empty)
         } else {
@@ -245,7 +306,7 @@ private final class UsageContentView: NSView {
                 stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
                 stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
                 stack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
-                documentView.widthAnchor.constraint(equalToConstant: 294)
+                documentView.widthAnchor.constraint(equalToConstant: 286)
             ])
 
             let scroll = NSScrollView()
@@ -256,7 +317,7 @@ private final class UsageContentView: NSView {
             scroll.documentView = documentView
             scroll.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                scroll.widthAnchor.constraint(equalToConstant: 294),
+                scroll.widthAnchor.constraint(equalToConstant: 286),
                 scroll.heightAnchor.constraint(equalToConstant: 172)
             ])
             listView = scroll
@@ -266,8 +327,16 @@ private final class UsageContentView: NSView {
     }
 
     private func makeKeyRow(_ key: UsageKey) -> NSView {
-        let dot = label("●", size: 8, color: .systemGreen)
-        dot.toolTip = "已启用"
+        let concurrency: NSTextField
+        if key.concurrency > 0 {
+            concurrency = label("● \(key.concurrency)", size: 10, weight: .medium, color: .systemGreen)
+            concurrency.toolTip = "当前并发 \(key.concurrency)"
+        } else {
+            concurrency = label("", size: 10)
+        }
+        concurrency.alignment = .left
+        concurrency.widthAnchor.constraint(equalToConstant: 24).isActive = true
+        concurrency.setContentCompressionResistancePriority(.required, for: .horizontal)
         let name = label(key.name, size: 11, weight: .medium)
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let value = label("今日 \(currency(key.todayActualCost))",
@@ -276,17 +345,74 @@ private final class UsageContentView: NSView {
         value.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         value.setContentCompressionResistancePriority(.required, for: .horizontal)
         let spacer = NSView()
-        let top = NSStackView(views: [dot, name, spacer, value])
+        let top = NSStackView(views: [concurrency, name, spacer, value])
         top.orientation = .horizontal
         top.alignment = .firstBaseline
         top.spacing = 6
 
         top.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
         NSLayoutConstraint.activate([
-            top.widthAnchor.constraint(equalToConstant: 294),
+            top.widthAnchor.constraint(equalToConstant: 286),
             top.heightAnchor.constraint(equalToConstant: 27)
         ])
         return top
+    }
+
+    private func panel(_ content: NSView) -> NSView {
+        let effect = NSVisualEffectView()
+        effect.material = .contentBackground
+        effect.blendingMode = .withinWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 11
+        effect.layer?.borderWidth = 0.5
+        effect.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.46).cgColor
+        effect.shadow = NSShadow()
+        effect.layer?.shadowColor = NSColor.black.cgColor
+        effect.layer?.shadowOpacity = 0.09
+        effect.layer?.shadowRadius = 2
+        effect.layer?.shadowOffset = NSSize(width: 0, height: -1)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        effect.addSubview(content)
+        NSLayoutConstraint.activate([
+            effect.widthAnchor.constraint(equalToConstant: 316),
+            content.topAnchor.constraint(equalTo: effect.topAnchor, constant: 12),
+            content.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 15),
+            content.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -15),
+            content.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -12)
+        ])
+        return effect
+    }
+
+    private func metricTile(_ content: NSView) -> NSView {
+        let tile = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        tile.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: tile.topAnchor, constant: 4),
+            content.leadingAnchor.constraint(equalTo: tile.leadingAnchor, constant: 9),
+            content.trailingAnchor.constraint(equalTo: tile.trailingAnchor, constant: -9),
+            content.bottomAnchor.constraint(equalTo: tile.bottomAnchor, constant: -4)
+        ])
+        return tile
+    }
+
+    private func sectionSeparator() -> NSView {
+        let container = NSView()
+        let line = NSView()
+        line.wantsLayer = true
+        line.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.34).cgColor
+        line.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(line)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: 286),
+            container.heightAnchor.constraint(equalToConstant: 25),
+            line.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            line.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            line.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            line.heightAnchor.constraint(equalToConstant: 1)
+        ])
+        return container
     }
 
     private func makeLoadingView() -> NSView {
@@ -315,7 +441,7 @@ private final class UsageContentView: NSView {
         stack.wantsLayer = true
         stack.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.10).cgColor
         stack.layer?.cornerRadius = 6
-        stack.widthAnchor.constraint(equalToConstant: 294).isActive = true
+        stack.widthAnchor.constraint(equalToConstant: 286).isActive = true
         return stack
     }
 
@@ -426,14 +552,6 @@ private func wrappingLabel(_ text: String, size: CGFloat, color: NSColor) -> NST
     return field
 }
 
-@MainActor
-private func separator() -> NSBox {
-    let box = NSBox()
-    box.boxType = .separator
-    box.widthAnchor.constraint(equalToConstant: 294).isActive = true
-    return box
-}
-
 private let timeFormatter: DateFormatter = {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "zh_CN")
@@ -443,4 +561,17 @@ private let timeFormatter: DateFormatter = {
 
 private func currency(_ value: Double) -> String {
     String(format: "$%.2f", value)
+}
+
+private func compactTokenCount(_ value: Int64) -> String {
+    switch value {
+    case 1_000_000_000...:
+        return String(format: "%.1fB", Double(value) / 1_000_000_000)
+    case 1_000_000...:
+        return String(format: "%.1fM", Double(value) / 1_000_000)
+    case 1_000...:
+        return String(format: "%.1fK", Double(value) / 1_000)
+    default:
+        return String(value)
+    }
 }

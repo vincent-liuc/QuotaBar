@@ -58,6 +58,16 @@ struct APIKeyUsageStat: Decodable, Sendable {
     }
 }
 
+struct DashboardStats: Decodable, Sendable {
+    let totalTokens: Int64
+    let totalActualCost: Double
+
+    enum CodingKeys: String, CodingKey {
+        case totalTokens = "total_tokens"
+        case totalActualCost = "total_actual_cost"
+    }
+}
+
 struct SubscriptionGroup: Decodable, Sendable {
     let weeklyLimitUSD: Double?
 
@@ -86,8 +96,14 @@ struct WeeklyUsage: Equatable, Sendable {
     let total: Double
 }
 
+struct AccountMetrics: Equatable, Sendable {
+    let totalTokens: Int64
+    let totalActualCost: Double
+}
+
 struct UsageData: Equatable, Sendable {
     let weeklyUsage: WeeklyUsage
+    let accountMetrics: AccountMetrics
     let keys: [UsageKey]
 }
 
@@ -98,12 +114,14 @@ struct UsageKey: Decodable, Equatable, Sendable {
     let quota: Double
     let quotaUsed: Double
     let updatedAt: Date?
+    var currentConcurrency: Int? = nil
     var todayActualCost: Double = 0
 
     enum CodingKeys: String, CodingKey {
         case id, name, status, quota
         case quotaUsed = "quota_used"
         case updatedAt = "updated_at"
+        case currentConcurrency = "current_concurrency"
     }
 
     var remaining: Double { max(quota - quotaUsed, 0) }
@@ -114,12 +132,14 @@ struct UsageKey: Decodable, Equatable, Sendable {
     }
 
     var isActive: Bool { status == "active" }
+    var concurrency: Int { max(currentConcurrency ?? 0, 0) }
 }
 
 struct UsageSnapshot: Equatable, Sendable {
     let keys: [UsageKey]
     let used: Double
     let total: Double
+    let accountMetrics: AccountMetrics
     let fetchedAt: Date
 
     var serverUpdatedAt: Date? { keys.compactMap(\.updatedAt).max() }
@@ -133,7 +153,12 @@ struct UsageSnapshot: Equatable, Sendable {
 
     var isOverQuota: Bool { total > 0 && used > total }
 
-    init(weeklyUsage: WeeklyUsage, keys: [UsageKey], fetchedAt: Date = Date()) {
+    init(
+        weeklyUsage: WeeklyUsage,
+        accountMetrics: AccountMetrics = AccountMetrics(totalTokens: 0, totalActualCost: 0),
+        keys: [UsageKey],
+        fetchedAt: Date = Date()
+    ) {
         self.keys = keys.filter(\.isActive).sorted { lhs, rhs in
             if lhs.todayActualCost != rhs.todayActualCost {
                 return lhs.todayActualCost > rhs.todayActualCost
@@ -142,6 +167,7 @@ struct UsageSnapshot: Equatable, Sendable {
         }
         used = weeklyUsage.used
         total = weeklyUsage.total
+        self.accountMetrics = accountMetrics
         self.fetchedAt = fetchedAt
     }
 }
