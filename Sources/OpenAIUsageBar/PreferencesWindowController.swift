@@ -12,7 +12,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "OpenAI用量设置"
+        window.title = "设置"
         window.contentViewController = preferencesController
         window.isReleasedWhenClosed = false
         window.isMovableByWindowBackground = true
@@ -502,7 +502,7 @@ private final class SettingsTabButton: NSButton {
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        super.hitTest(point) == nil ? nil : self
     }
 
     override func draw(_ dirtyRect: NSRect) {
