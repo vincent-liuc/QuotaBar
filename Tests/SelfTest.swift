@@ -11,12 +11,14 @@ enum SelfTest {
         try testStationProfiles()
         try testReleaseResolution()
         try await testUpdateCheckRetry()
+        try await testLoginOnlyUsesLoginEndpoint()
         try await testPaginationAndDeduplication()
         try await testOptionalEndpointDegradation()
         testLegacyDefaultsMigration()
         testStatusCatFill()
         testWeeklyResetCalculation()
-        print("Self-test passed: 12 checks")
+        try testCredentialFileStorage()
+        print("Self-test passed: 14 checks")
     }
 
     private static func testDecodesUsageHistory() throws {
@@ -201,6 +203,30 @@ enum SelfTest {
         )
     }
 
+    private static func testCredentialFileStorage() throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "QuotaBar-CredentialTest-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+        let store = CredentialStore(baseDirectory: baseDirectory)
+        let profileID = UUID()
+        let expected = Credentials(email: "local@example.com", password: "secret")
+        let missingCredentials = try store.load(for: profileID)
+        require(missingCredentials == nil, "missing local credential is nil")
+        try store.save(expected, for: profileID)
+        let loadedCredentials = try store.load(for: profileID)
+        require(loadedCredentials == expected, "local credential round trip")
+
+        let directory = baseDirectory.appending(path: "QuotaBar", directoryHint: .isDirectory)
+        let file = directory.appending(path: "credentials.json")
+        let directoryMode = try FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? NSNumber
+        let fileMode = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? NSNumber
+        require(directoryMode?.intValue == 0o700, "credential directory permissions")
+        require(fileMode?.intValue == 0o600, "credential file permissions")
+        try store.delete(for: profileID)
+        let deletedCredentials = try store.load(for: profileID)
+        require(deletedCredentials == nil, "local credential deleted")
+    }
+
     private static func testStationProfiles() throws {
         let profile = try StationProfile(
             name: " Proxy ",
@@ -292,6 +318,27 @@ enum SelfTest {
         }
         require(version == "1.11.0", "update check succeeds after timeout retry")
         require(attempts.values.count == 2, "update check retries transient timeout")
+    }
+
+    private static func testLoginOnlyUsesLoginEndpoint() async throws {
+        let requestedPaths = LockedStrings()
+        MockURLProtocol.requestHandler = { request in
+            let url = try requireURL(request)
+            requestedPaths.append(url.path)
+            return mockResponse(
+                url: url,
+                json: #"{"code":0,"message":"success","data":{"access_token":"login-test-token"}}"#
+            )
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let client = APIClient(session: URLSession(configuration: configuration))
+        try await client.testLogin(
+            profile: StationProfile(name: "Login", serviceURL: "https://relay.example.com"),
+            credentials: Credentials(email: "test@example.com", password: "test")
+        )
+        require(requestedPaths.values == ["/api/v1/auth/login"], "login test only requests login endpoint")
     }
 
     private static func testPaginationAndDeduplication() async throws {
@@ -514,6 +561,19 @@ private final class LockedPages: @unchecked Sendable {
     }
 
     func append(_ value: Int) {
+        lock.withLock { storage.append(value) }
+    }
+}
+
+private final class LockedStrings: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    var values: [String] {
+        lock.withLock { storage }
+    }
+
+    func append(_ value: String) {
         lock.withLock { storage.append(value) }
     }
 }

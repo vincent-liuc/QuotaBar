@@ -62,6 +62,11 @@ final class UsageStore {
         return try await client.testConnection(profile: profile.validated(), credentials: credentials)
     }
 
+    func testLogin(profile: StationProfile, credentials: Credentials) async throws {
+        try validate(credentials)
+        try await client.testLogin(profile: profile.validated(), credentials: credentials)
+    }
+
     func updatePreferences(_ updatedPreferences: UserPreferences) throws {
         let launchChanged = updatedPreferences.launchAtLogin != preferences.launchAtLogin
         let intervalChanged = updatedPreferences.refreshInterval != preferences.refreshInterval

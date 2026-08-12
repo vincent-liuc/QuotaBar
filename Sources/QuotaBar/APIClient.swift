@@ -20,6 +20,7 @@ enum APIClientError: LocalizedError, Equatable {
 
 protocol UsageFetching: Sendable {
     func fetchUsage(profile: StationProfile, credentials: Credentials) async throws -> UsageData
+    func testLogin(profile: StationProfile, credentials: Credentials) async throws
     func testConnection(profile: StationProfile, credentials: Credentials) async throws -> ConnectionTestResult
     func invalidateSession() async
 }
@@ -95,6 +96,10 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
             },
             checkedAt: Date()
         )
+    }
+
+    func testLogin(profile: StationProfile, credentials: Credentials) async throws {
+        _ = try await login(profile: profile.validated(), credentials: credentials)
     }
 
     func invalidateSession() {

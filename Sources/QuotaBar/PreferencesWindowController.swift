@@ -56,6 +56,11 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let subscriptionPopup = NSPopUpButton()
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
+    private let visiblePasswordField = NSTextField()
+    private let passwordContainer = NSView()
+    private let passwordVisibilityButton = NSButton()
+    private let loginTestButton = NSButton(title: "测试登录", target: nil, action: nil)
+    private let loginStatusLabel = settingsLabel("尚未测试", size: 11, color: .secondaryLabelColor)
     private let refreshField = NSTextField()
     private let refreshStepper = NSStepper()
     private let launchAtLoginSwitch = NSSwitch()
@@ -131,7 +136,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func configureControls() {
-        [nameField, serviceURLField, apiPathField, emailField, passwordField, refreshField].forEach {
+        [nameField, serviceURLField, apiPathField, emailField, passwordField, visiblePasswordField, refreshField].forEach {
             $0.delegate = self
         }
         configureTextField(nameField, placeholder: "例如：主站")
@@ -139,6 +144,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         configureTextField(apiPathField, placeholder: "/api/v1")
         configureTextField(emailField, placeholder: "name@example.com")
         configureTextField(passwordField, placeholder: "输入登录密码")
+        configureTextField(visiblePasswordField, placeholder: "输入登录密码")
+        configurePasswordControl()
 
         refreshField.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
         refreshField.alignment = .right
@@ -178,9 +185,11 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         profilePopup.action = #selector(changeProfile)
         testButton.target = self
         testButton.action = #selector(testConnection)
+        loginTestButton.target = self
+        loginTestButton.action = #selector(testLogin)
         updateButton.target = self
         updateButton.action = #selector(checkForUpdates)
-        [testButton, updateButton].forEach { $0.bezelStyle = .rounded }
+        [testButton, loginTestButton, updateButton].forEach { $0.bezelStyle = .rounded }
         messageLabel.maximumNumberOfLines = 2
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.isHidden = true
@@ -261,15 +270,20 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private func makeAccountTab() -> NSView {
         let lockIcon = NSImageView(image: settingsSymbol("lock.fill", pointSize: 9))
         lockIcon.contentTintColor = .secondaryLabelColor
-        let note = NSStackView(views: [lockIcon, settingsLabel("账号密码按站点保存在本机钥匙串", size: 10, color: .secondaryLabelColor)])
+        let note = NSStackView(views: [lockIcon, settingsLabel("账号密码仅保存在本机应用支持目录", size: 10, color: .secondaryLabelColor)])
         note.orientation = .horizontal
         note.alignment = .centerY
         note.spacing = 5
+        let loginControls = NSStackView(views: [loginTestButton, loginStatusLabel])
+        loginControls.orientation = .horizontal
+        loginControls.alignment = .centerY
+        loginControls.spacing = 9
         return tabStack([
             sectionTitle("账户"),
             settingsPanel([
                 fieldRow(title: "登录账号", field: emailField),
-                fieldRow(title: "登录密码", field: passwordField)
+                settingsRow(title: "登录密码", control: passwordContainer),
+                settingsRow(title: "登录验证", control: loginControls)
             ])
         ], bottomView: note)
     }
@@ -382,6 +396,30 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         field.heightAnchor.constraint(equalToConstant: 26).isActive = true
     }
 
+    private func configurePasswordControl() {
+        visiblePasswordField.isHidden = true
+        configureIconButton(passwordVisibilityButton, symbol: "eye", toolTip: "显示密码")
+        passwordVisibilityButton.target = self
+        passwordVisibilityButton.action = #selector(togglePasswordVisibility)
+        passwordVisibilityButton.bezelStyle = .inline
+        passwordContainer.widthAnchor.constraint(equalToConstant: 330).isActive = true
+        passwordContainer.heightAnchor.constraint(equalToConstant: 26).isActive = true
+        [passwordField, visiblePasswordField, passwordVisibilityButton].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            passwordContainer.addSubview($0)
+        }
+        NSLayoutConstraint.activate([
+            passwordField.leadingAnchor.constraint(equalTo: passwordContainer.leadingAnchor),
+            passwordField.trailingAnchor.constraint(equalTo: passwordVisibilityButton.leadingAnchor, constant: -4),
+            passwordField.centerYAnchor.constraint(equalTo: passwordContainer.centerYAnchor),
+            visiblePasswordField.leadingAnchor.constraint(equalTo: passwordContainer.leadingAnchor),
+            visiblePasswordField.trailingAnchor.constraint(equalTo: passwordVisibilityButton.leadingAnchor, constant: -4),
+            visiblePasswordField.centerYAnchor.constraint(equalTo: passwordContainer.centerYAnchor),
+            passwordVisibilityButton.trailingAnchor.constraint(equalTo: passwordContainer.trailingAnchor),
+            passwordVisibilityButton.centerYAnchor.constraint(equalTo: passwordContainer.centerYAnchor)
+        ])
+    }
+
     private func configureIconButton(_ button: NSButton, symbol: String, toolTip: String) {
         button.image = settingsSymbol(symbol, pointSize: 12)
         button.title = ""
@@ -391,11 +429,14 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     func controlTextDidChange(_ obj: Notification) {
+        if let field = obj.object as? NSTextField { synchronizePasswordFields(from: field) }
         clearMessage()
+        loginStatusLabel.stringValue = "尚未测试"
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
         guard !isLoadingControls, let field = obj.object as? NSTextField else { return }
+        synchronizePasswordFields(from: field)
         if field === refreshField {
             refreshField.integerValue = Int(UserPreferences.normalizedRefreshInterval(field.doubleValue))
             refreshStepper.integerValue = refreshField.integerValue
@@ -423,6 +464,14 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         Credentials(email: emailField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines), password: passwordField.stringValue)
     }
 
+    private func synchronizePasswordFields(from field: NSTextField) {
+        if field === passwordField {
+            visiblePasswordField.stringValue = passwordField.stringValue
+        } else if field === visiblePasswordField {
+            passwordField.stringValue = visiblePasswordField.stringValue
+        }
+    }
+
     private func loadProfile(_ profile: StationProfile) {
         isLoadingControls = true
         defer { isLoadingControls = false }
@@ -435,6 +484,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         let credentials = store.credentials(for: profile.id)
         emailField.stringValue = credentials?.email ?? ""
         passwordField.stringValue = credentials?.password ?? ""
+        visiblePasswordField.stringValue = passwordField.stringValue
+        loginStatusLabel.stringValue = "尚未测试"
         subscriptions = []
         reloadSubscriptionPopup(selection: profile.subscriptionSelection)
         connectionLabel.stringValue = capabilitySummary(profile)
@@ -510,7 +561,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         let profile = editingProfile
         let alert = NSAlert()
         alert.messageText = "删除站点“\(profile.name)”？"
-        alert.informativeText = "该站点保存在钥匙串中的账号密码也会被删除。"
+        alert.informativeText = "该站点保存在本机的账号密码也会被删除。"
         alert.alertStyle = .warning
         alert.addButton(withTitle: "删除")
         alert.addButton(withTitle: "取消")
@@ -550,6 +601,35 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             testButton.title = "测试连接"
             testButton.isEnabled = true
         }
+    }
+
+    @objc private func testLogin() {
+        loginTestButton.isEnabled = false
+        loginTestButton.title = "测试中…"
+        loginStatusLabel.textColor = .secondaryLabelColor
+        loginStatusLabel.stringValue = "正在验证"
+        Task {
+            do {
+                try await store.testLogin(profile: profileFromControls(), credentials: enteredCredentials)
+                loginStatusLabel.textColor = .systemGreen
+                loginStatusLabel.stringValue = "登录成功"
+            } catch {
+                loginStatusLabel.textColor = .systemRed
+                loginStatusLabel.stringValue = error.localizedDescription
+            }
+            loginTestButton.title = "测试登录"
+            loginTestButton.isEnabled = true
+        }
+    }
+
+    @objc private func togglePasswordVisibility() {
+        let shouldShow = visiblePasswordField.isHidden
+        synchronizePasswordFields(from: shouldShow ? passwordField : visiblePasswordField)
+        passwordField.isHidden = shouldShow
+        visiblePasswordField.isHidden = !shouldShow
+        passwordVisibilityButton.image = settingsSymbol(shouldShow ? "eye.slash" : "eye", pointSize: 12)
+        passwordVisibilityButton.toolTip = shouldShow ? "隐藏密码" : "显示密码"
+        view.window?.makeFirstResponder(shouldShow ? visiblePasswordField : passwordField)
     }
 
     private func persistProfileFromControls() {

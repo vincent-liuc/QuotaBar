@@ -8,8 +8,38 @@ enum QuotaBarApp {
         let delegate = AppController()
         application.delegate = delegate
         application.setActivationPolicy(.accessory)
+        application.mainMenu = makeMainMenu()
         application.run()
         _ = delegate
+    }
+
+    @MainActor
+    private static func makeMainMenu() -> NSMenu {
+        let mainMenu = NSMenu()
+
+        let applicationMenuItem = NSMenuItem()
+        let applicationMenu = NSMenu(title: "QuotaBar")
+        applicationMenu.addItem(
+            withTitle: "退出 QuotaBar",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        applicationMenuItem.submenu = applicationMenu
+        mainMenu.addItem(applicationMenuItem)
+
+        let windowMenuItem = NSMenuItem(title: "窗口", action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu(title: "窗口")
+        let closeItem = NSMenuItem(
+            title: "关闭窗口",
+            action: #selector(NSWindow.performClose(_:)),
+            keyEquivalent: "w"
+        )
+        closeItem.keyEquivalentModifierMask = .command
+        windowMenu.addItem(closeItem)
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        NSApplication.shared.windowsMenu = windowMenu
+        return mainMenu
     }
 }
 
