@@ -3,9 +3,7 @@ set -euo pipefail
 
 project_dir="${0:A:h:h}"
 app_name="OpenAI用量"
-version="1.5.0"
 app_zip="$project_dir/outputs/OpenAI-Usage-macOS.zip"
-output_dmg="$project_dir/outputs/OpenAI用量-$version-universal.dmg"
 staging_dir="$(mktemp -d /tmp/dev.ruobin.OpenAIUsageBar-dmg.XXXXXX)"
 mount_point=""
 
@@ -21,6 +19,8 @@ cd "$project_dir"
 zsh scripts/build-app.sh
 
 ditto -x -k "$app_zip" "$staging_dir"
+version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$staging_dir/$app_name.app/Contents/Info.plist")"
+output_dmg="$project_dir/outputs/OpenAI用量-$version-universal.dmg"
 ln -s /Applications "$staging_dir/Applications"
 cp "$project_dir/Assets/AppIcon.icns" "$staging_dir/.VolumeIcon.icns"
 

@@ -5,7 +5,6 @@ final class UsagePopoverController: NSViewController {
     private let store: UsageStore
     private let showPreferences: () -> Void
     private let bodyContainer = NSView()
-    private let headerIcon = NSImageView()
     private let refreshButton = NSButton()
     private let settingsButton = NSButton()
     private let headerUpdatedLabel = NSTextField(labelWithString: "")
@@ -42,7 +41,7 @@ final class UsagePopoverController: NSViewController {
             header.topAnchor.constraint(equalTo: root.topAnchor),
             header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 44),
+            header.heightAnchor.constraint(equalToConstant: 32),
             bodyContainer.topAnchor.constraint(equalTo: header.bottomAnchor),
             bodyContainer.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             bodyContainer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -75,29 +74,13 @@ final class UsagePopoverController: NSViewController {
         headerUpdatedLabel.stringValue = store.snapshot.map {
             "更新于 \(timeFormatter.string(from: $0.fetchedAt))"
         } ?? ""
-        headerIcon.image = StatusRingRenderer.image(
-            progress: store.snapshot?.progress,
-            phase: store.phase
-        )
-
         nextBody.layoutSubtreeIfNeeded()
         let bodyHeight = nextBody.fittingSize.height
-        preferredContentSize = NSSize(width: 332, height: max(bodyHeight + 44, 150))
+        preferredContentSize = NSSize(width: 332, height: max(bodyHeight + 32, 150))
     }
 
     private func makeHeader() -> NSView {
-        headerIcon.image = StatusRingRenderer.image(
-            progress: store.snapshot?.progress,
-            phase: store.phase
-        )
-        headerIcon.imageScaling = .scaleProportionallyUpOrDown
-        headerIcon.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            headerIcon.widthAnchor.constraint(equalToConstant: 20),
-            headerIcon.heightAnchor.constraint(equalToConstant: 20)
-        ])
-
-        let title = label("Dashboard", size: 13, weight: .semibold)
+        let title = label("Dashboard", size: 12, color: .secondaryLabelColor)
         title.setContentHuggingPriority(.required, for: .horizontal)
 
         configureIconButton(refreshButton, symbolName: "arrow.clockwise", toolTip: "立即刷新")
@@ -119,11 +102,11 @@ final class UsagePopoverController: NSViewController {
         headerUpdatedLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let spacer = NSView()
-        let stack = NSStackView(views: [headerIcon, title, spacer, headerUpdatedLabel, actions])
+        let stack = NSStackView(views: [title, spacer, headerUpdatedLabel, actions])
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 12, bottom: 0, right: 7)
+        stack.spacing = 5
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 7)
         return stack
     }
 
@@ -358,12 +341,7 @@ private final class UsageContentView: NSView {
     }
 
     private func panel(_ content: NSView) -> NSView {
-        let wrapper = NSView()
-        wrapper.wantsLayer = true
-        wrapper.layer?.shadowColor = NSColor.black.cgColor
-        wrapper.layer?.shadowOpacity = 0.12
-        wrapper.layer?.shadowRadius = 3
-        wrapper.layer?.shadowOffset = NSSize(width: 0, height: -1)
+        let wrapper = PopoverPanelView(cornerRadius: 11)
 
         let effect = NSVisualEffectView()
         effect.material = .sidebar
@@ -372,8 +350,6 @@ private final class UsageContentView: NSView {
         effect.wantsLayer = true
         effect.layer?.cornerRadius = 11
         effect.layer?.masksToBounds = true
-        effect.layer?.borderWidth = 0.5
-        effect.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.42).cgColor
         effect.translatesAutoresizingMaskIntoConstraints = false
         wrapper.addSubview(effect)
 
@@ -385,6 +361,10 @@ private final class UsageContentView: NSView {
 
         content.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(content)
+
+        let border = PopoverBorderView(cornerRadius: 11)
+        border.translatesAutoresizingMaskIntoConstraints = false
+        wrapper.addSubview(border)
         NSLayoutConstraint.activate([
             wrapper.widthAnchor.constraint(equalToConstant: 316),
             effect.topAnchor.constraint(equalTo: wrapper.topAnchor),
@@ -398,7 +378,11 @@ private final class UsageContentView: NSView {
             content.topAnchor.constraint(equalTo: effect.topAnchor, constant: 12),
             content.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 15),
             content.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -15),
-            content.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -12)
+            content.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -12),
+            border.topAnchor.constraint(equalTo: wrapper.topAnchor),
+            border.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
+            border.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
+            border.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor)
         ])
         return wrapper
     }
@@ -417,19 +401,10 @@ private final class UsageContentView: NSView {
     }
 
     private func sectionSeparator() -> NSView {
-        let container = NSView()
-        let line = NSView()
-        line.wantsLayer = true
-        line.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.34).cgColor
-        line.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(line)
+        let container = HairlineSeparatorView()
         NSLayoutConstraint.activate([
             container.widthAnchor.constraint(equalToConstant: 286),
-            container.heightAnchor.constraint(equalToConstant: 25),
-            line.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            line.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            line.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            line.heightAnchor.constraint(equalToConstant: 1)
+            container.heightAnchor.constraint(equalToConstant: 23)
         ])
         return container
     }
@@ -464,6 +439,83 @@ private final class UsageContentView: NSView {
         return stack
     }
 
+}
+
+private final class PopoverPanelView: NSView {
+    private let radius: CGFloat
+
+    init(cornerRadius: CGFloat) {
+        radius = cornerRadius
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.16
+        layer?.shadowRadius = 4
+        layer?.shadowOffset = NSSize(width: 0, height: -1)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    }
+
+}
+
+private final class PopoverBorderView: NSView {
+    private let radius: CGFloat
+
+    init(cornerRadius: CGFloat) {
+        radius = cornerRadius
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let lineWidth = 1 / scale
+        let path = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
+            xRadius: radius,
+            yRadius: radius
+        )
+        path.lineWidth = lineWidth
+        NSColor.separatorColor.withAlphaComponent(0.38).setStroke()
+        path.stroke()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsDisplay = true
+    }
+}
+
+private final class HairlineSeparatorView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        let lineWidth = 1 / scale
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: bounds.minX, y: bounds.midY))
+        path.line(to: NSPoint(x: bounds.maxX, y: bounds.midY))
+        path.lineWidth = lineWidth
+        NSColor.separatorColor.withAlphaComponent(0.20).setStroke()
+        path.stroke()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsDisplay = true
+    }
 }
 
 private final class FlippedView: NSView {
