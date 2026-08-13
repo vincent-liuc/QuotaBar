@@ -1,9 +1,10 @@
 import Foundation
 
 struct UserPreferences: Equatable, Sendable {
-    static let defaultRefreshInterval: TimeInterval = 10
+    static let refreshIntervalOptions: [TimeInterval] = [5, 10, 30, 60]
+    static let defaultRefreshInterval: TimeInterval = 60
     static let minimumRefreshInterval: TimeInterval = 5
-    static let maximumRefreshInterval: TimeInterval = 3_600
+    static let maximumRefreshInterval: TimeInterval = 60
 
     let refreshInterval: TimeInterval
     let launchAtLogin: Bool
@@ -30,7 +31,11 @@ struct UserPreferences: Equatable, Sendable {
 
     static func normalizedRefreshInterval(_ value: TimeInterval) -> TimeInterval {
         guard value.isFinite else { return defaultRefreshInterval }
-        return min(max(value.rounded(), minimumRefreshInterval), maximumRefreshInterval)
+        return refreshIntervalOptions.min {
+            let leftDistance = abs($0 - value)
+            let rightDistance = abs($1 - value)
+            return leftDistance == rightDistance ? $0 > $1 : leftDistance < rightDistance
+        } ?? defaultRefreshInterval
     }
 }
 

@@ -110,10 +110,11 @@ enum SelfTest {
     }
 
     private static func testPreferenceNormalization() {
-        require(UserPreferences.normalizedRefreshInterval(1) == 5, "minimum refresh interval")
-        require(UserPreferences.normalizedRefreshInterval(10.4) == 10, "rounded refresh interval")
-        require(UserPreferences.normalizedRefreshInterval(4_000) == 3_600, "maximum refresh interval")
-        require(UserPreferences.normalizedRefreshInterval(.nan) == 10, "invalid refresh interval")
+        require(UserPreferences.normalizedRefreshInterval(1) == 5, "minimum refresh option")
+        require(UserPreferences.normalizedRefreshInterval(10.4) == 10, "nearest refresh option")
+        require(UserPreferences.normalizedRefreshInterval(45) == 60, "refresh option tie favors lower frequency")
+        require(UserPreferences.normalizedRefreshInterval(4_000) == 60, "maximum refresh option")
+        require(UserPreferences.normalizedRefreshInterval(.nan) == 60, "invalid refresh interval uses default")
 
         let preferences = UserPreferences(
             refreshInterval: 30,
@@ -134,6 +135,7 @@ enum SelfTest {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let store = PreferencesStore(defaults: defaults)
         let initial = store.load()
+        require(initial.refreshInterval == 60, "refresh interval defaults to one minute")
         require(initial.showAPIKeyDetails, "API key details default enabled")
         require(initial.showMetricCards, "metric cards default enabled")
         require(initial.showUsageHistory, "usage history default enabled")
@@ -181,8 +183,8 @@ enum SelfTest {
         let full = bitmap(1)
         let waveA = StatusRingRenderer.image(progress: 0.5, phase: .ready, wavePhase: 0)
         let waveB = StatusRingRenderer.image(progress: 0.5, phase: .ready, wavePhase: .pi / 2)
-        let resting = bitmapImage(StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: .pi * 0.5))
-        let twitching = bitmapImage(StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: .pi))
+        let leftEar = bitmapImage(StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: .pi * 1.5))
+        let rightEar = bitmapImage(StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: .pi * 0.5))
         let split = max(ten.pixelsHigh / 2, 1)
         require(greenPixels(empty, rows: 0..<empty.pixelsHigh) == 0, "zero usage cat remains black")
         require(greenPixels(ten, rows: 0..<ten.pixelsHigh) > 0, "ten percent cat has green fill")
@@ -192,14 +194,14 @@ enum SelfTest {
         require(greenPixels(full, rows: 0..<full.pixelsHigh) > greenPixels(ten, rows: 0..<ten.pixelsHigh), "full cat has more green fill")
         require(empty.colorAt(x: 0, y: 0)?.alphaComponent == 0, "status icon has no outer background")
         require(waveA.tiffRepresentation != waveB.tiffRepresentation, "wave phase animates green surface")
-        let topEnd = Int(ceil(Double(resting.pixelsHigh) * 0.34))
+        let topEnd = Int(ceil(Double(leftEar.pixelsHigh) * 0.40))
         var changedTopPixels = 0
         for y in 0..<topEnd {
-            for x in 0..<resting.pixelsWide where pixelsDiffer(resting, twitching, x: x, y: y) {
+            for x in 0..<leftEar.pixelsWide where pixelsDiffer(leftEar, rightEar, x: x, y: y) {
                 changedTopPixels += 1
             }
         }
-        require(changedTopPixels >= 2, "ear twitch visibly changes the 20px top silhouette")
+        require(changedTopPixels >= 8, "left ear swing visibly changes the 20px top silhouette")
     }
 
     private static func bitmapImage(_ image: NSImage) -> NSBitmapImageRep {

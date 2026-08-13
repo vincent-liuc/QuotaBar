@@ -62,8 +62,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let passwordVisibilityButton = NSButton()
     private let loginTestButton = NSButton(title: "测试登录", target: nil, action: nil)
     private let loginStatusLabel = settingsLabel("尚未测试", size: 11, color: .secondaryLabelColor)
-    private let refreshField = NSTextField()
-    private let refreshStepper = NSStepper()
+    private let refreshPopup = NSPopUpButton()
     private let launchAtLoginSwitch = NSSwitch()
     private let showAPIKeyDetailsSwitch = NSSwitch()
     private let showMetricCardsSwitch = NSSwitch()
@@ -138,7 +137,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func configureControls() {
-        [nameField, serviceURLField, apiPathField, emailField, passwordField, visiblePasswordField, refreshField].forEach {
+        [nameField, serviceURLField, apiPathField, emailField, passwordField, visiblePasswordField].forEach {
             $0.delegate = self
         }
         configureTextField(nameField, placeholder: "例如：主站")
@@ -149,17 +148,14 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         configureTextField(visiblePasswordField, placeholder: "输入登录密码")
         configurePasswordControl()
 
-        refreshField.font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        refreshField.alignment = .right
-        refreshField.formatter = settingsRefreshFormatter
-        refreshField.widthAnchor.constraint(equalToConstant: 42).isActive = true
-        refreshField.integerValue = Int(store.preferences.refreshInterval)
-        refreshStepper.minValue = UserPreferences.minimumRefreshInterval
-        refreshStepper.maxValue = UserPreferences.maximumRefreshInterval
-        refreshStepper.increment = 1
-        refreshStepper.integerValue = refreshField.integerValue
-        refreshStepper.target = self
-        refreshStepper.action = #selector(stepRefreshInterval)
+        for interval in UserPreferences.refreshIntervalOptions {
+            refreshPopup.addItem(withTitle: refreshIntervalTitle(interval))
+            refreshPopup.lastItem?.representedObject = interval
+        }
+        refreshPopup.widthAnchor.constraint(equalToConstant: 110).isActive = true
+        refreshPopup.target = self
+        refreshPopup.action = #selector(preferenceControlChanged)
+        selectRefreshInterval(store.preferences.refreshInterval)
         launchAtLoginSwitch.state = store.preferences.launchAtLogin ? .on : .off
         showAPIKeyDetailsSwitch.state = store.preferences.showAPIKeyDetails ? .on : .off
         showMetricCardsSwitch.state = store.preferences.showMetricCards ? .on : .off
@@ -258,27 +254,30 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func makeStationTab() -> NSView {
-        let resetInfo = NSImageView(image: settingsSymbol("info.circle", pointSize: 12))
-        resetInfo.contentTintColor = .tertiaryLabelColor
-        resetInfo.toolTip = "订阅用量重置后，自动重置所有未被禁用的APIKey已消耗用量"
-        resetInfo.setAccessibilityLabel("自动重置用量说明")
-        resetInfo.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        let resetInfo = SettingsInfoButton(
+            message: "订阅用量重置后，自动重置所有未被禁用的APIKey已消耗用量"
+        )
         let resetControls = NSStackView(views: [resetInfo, automaticallyResetsAPIKeyQuotaSwitch])
         resetControls.orientation = .horizontal
         resetControls.alignment = .centerY
         resetControls.spacing = 7
+        connectionLabel.lineBreakMode = .byTruncatingTail
+        connectionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let connectionControls = NSStackView(views: [connectionLabel, testButton])
+        connectionControls.orientation = .horizontal
+        connectionControls.alignment = .centerY
+        connectionControls.spacing = 9
         return tabStack([
-            sectionTitle("Sub2API 站点"),
+            sectionTitle("站点配置"),
             settingsPanel([
                 fieldRow(title: "站点名称", field: nameField),
                 fieldRow(title: "服务地址", field: serviceURLField),
                 fieldRow(title: "API 路径", field: apiPathField),
                 settingsRow(title: "时区", control: timezonePopup),
                 settingsRow(title: "订阅", control: subscriptionPopup),
-                settingsRow(title: "自动重置用量", control: resetControls)
-            ]),
-            settingsRow(title: "兼容性检测", control: testButton),
-            connectionLabel
+                settingsRow(title: "自动重置用量", control: resetControls),
+                settingsRow(title: "兼容性测试", control: connectionControls)
+            ])
         ])
     }
 
@@ -304,13 +303,9 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func makeGeneralTab() -> NSView {
-        let refreshControls = NSStackView(views: [refreshField, settingsLabel("秒", size: 13), refreshStepper])
-        refreshControls.orientation = .horizontal
-        refreshControls.alignment = .centerY
-        refreshControls.spacing = 7
         return tabStack([
             sectionTitle("启动"), settingsPanel([settingsRow(title: "登录时自动启动", control: launchAtLoginSwitch)]),
-            sectionTitle("监控"), settingsPanel([settingsRow(title: "更新间隔", control: refreshControls)])
+            sectionTitle("监控"), settingsPanel([settingsRow(title: "更新间隔", control: refreshPopup)])
         ])
     }
 
@@ -453,13 +448,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     func controlTextDidEndEditing(_ obj: Notification) {
         guard !isLoadingControls, let field = obj.object as? NSTextField else { return }
         synchronizePasswordFields(from: field)
-        if field === refreshField {
-            refreshField.integerValue = Int(UserPreferences.normalizedRefreshInterval(field.doubleValue))
-            refreshStepper.integerValue = refreshField.integerValue
-            persistPreferences()
-        } else {
-            persistProfileFromControls()
-        }
+        persistProfileFromControls()
     }
 
     private func profileFromControls() -> StationProfile {
@@ -680,7 +669,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         guard !isLoadingControls else { return }
         do {
             try store.updatePreferences(UserPreferences(
-                refreshInterval: UserPreferences.normalizedRefreshInterval(refreshField.doubleValue),
+                refreshInterval: selectedRefreshInterval,
                 launchAtLogin: launchAtLoginSwitch.state == .on,
                 showAPIKeyDetails: showAPIKeyDetailsSwitch.state == .on,
                 showMetricCards: showMetricCardsSwitch.state == .on,
@@ -708,10 +697,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         statusBarHeightConstraint?.constant = 0
     }
 
-    @objc private func stepRefreshInterval() {
-        refreshField.integerValue = refreshStepper.integerValue
-        persistPreferences()
-    }
     @objc private func preferenceControlChanged() { persistPreferences() }
     @objc private func profileSelectionChanged() { persistProfileFromControls() }
     @objc private func selectTab(_ sender: SettingsTabButton) { selectTab(at: sender.tag) }
@@ -742,6 +727,94 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         }
     }
 
+}
+
+private extension PreferencesViewController {
+    var selectedRefreshInterval: TimeInterval {
+        refreshPopup.selectedItem?.representedObject as? TimeInterval
+            ?? UserPreferences.defaultRefreshInterval
+    }
+
+    func selectRefreshInterval(_ interval: TimeInterval) {
+        let normalized = UserPreferences.normalizedRefreshInterval(interval)
+        if let item = refreshPopup.itemArray.first(where: { ($0.representedObject as? TimeInterval) == normalized }) {
+            refreshPopup.select(item)
+        }
+    }
+
+    func refreshIntervalTitle(_ interval: TimeInterval) -> String {
+        interval == 60 ? "1分钟" : "\(Int(interval))秒"
+    }
+}
+
+@MainActor
+private final class SettingsInfoButton: NSButton {
+    private let tipPopover = NSPopover()
+    private var trackingAreaReference: NSTrackingArea?
+
+    init(message: String) {
+        super.init(frame: .zero)
+        image = settingsSymbol("info.circle", pointSize: 12)
+        title = ""
+        bezelStyle = .inline
+        isBordered = false
+        contentTintColor = .tertiaryLabelColor
+        toolTip = message
+        setAccessibilityLabel("自动重置用量说明")
+        setAccessibilityHelp(message)
+        target = self
+        action = #selector(toggleTip)
+        widthAnchor.constraint(equalToConstant: 20).isActive = true
+        heightAnchor.constraint(equalToConstant: 24).isActive = true
+
+        let label = settingsLabel(message, size: 12)
+        label.maximumNumberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        let controller = NSViewController()
+        let content = NSView()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(label)
+        NSLayoutConstraint.activate([
+            content.widthAnchor.constraint(equalToConstant: 290),
+            label.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
+            label.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            label.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+            label.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12)
+        ])
+        controller.view = content
+        tipPopover.contentViewController = controller
+        tipPopover.behavior = .transient
+        tipPopover.animates = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func updateTrackingAreas() {
+        if let trackingAreaReference { removeTrackingArea(trackingAreaReference) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaReference = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) { showTip() }
+    override func mouseExited(with event: NSEvent) {
+        if tipPopover.isShown { tipPopover.performClose(nil) }
+    }
+
+    @objc private func toggleTip() {
+        tipPopover.isShown ? tipPopover.performClose(nil) : showTip()
+    }
+
+    private func showTip() {
+        guard !tipPopover.isShown else { return }
+        tipPopover.show(relativeTo: bounds, of: self, preferredEdge: .maxY)
+    }
 }
 
 @MainActor
@@ -808,15 +881,6 @@ private extension Array where Element: Hashable {
         return filter { seen.insert($0).inserted }
     }
 }
-
-private let settingsRefreshFormatter: NumberFormatter = {
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .none
-    formatter.allowsFloats = false
-    formatter.minimum = NSNumber(value: UserPreferences.minimumRefreshInterval)
-    formatter.maximum = NSNumber(value: UserPreferences.maximumRefreshInterval)
-    return formatter
-}()
 
 private let settingsTimeFormatter: DateFormatter = {
     let formatter = DateFormatter()
