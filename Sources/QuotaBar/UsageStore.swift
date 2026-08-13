@@ -70,6 +70,7 @@ final class UsageStore {
     func updatePreferences(_ updatedPreferences: UserPreferences) throws {
         let launchChanged = updatedPreferences.launchAtLogin != preferences.launchAtLogin
         let intervalChanged = updatedPreferences.refreshInterval != preferences.refreshInterval
+        let automaticUpdateChanged = updatedPreferences.automaticallyUpdates != preferences.automaticallyUpdates
 
         if launchChanged {
             do {
@@ -84,6 +85,9 @@ final class UsageStore {
         }
         preferencesStore.save(updatedPreferences)
         preferences = updatedPreferences
+        if automaticUpdateChanged {
+            NotificationCenter.default.post(name: .quotaBarUpdatePreferencesChanged, object: nil)
+        }
         if intervalChanged { startPolling() }
         onChange?()
     }
@@ -118,6 +122,7 @@ final class UsageStore {
         showAPIKeyDetails: Bool,
         showMetricCards: Bool,
         showUsageHistory: Bool,
+        automaticallyUpdates: Bool,
         makeActive: Bool = true
     ) async throws {
         settingsMessage = nil
@@ -136,7 +141,8 @@ final class UsageStore {
             launchAtLogin: launchAtLogin,
             showAPIKeyDetails: showAPIKeyDetails,
             showMetricCards: showMetricCards,
-            showUsageHistory: showUsageHistory
+            showUsageHistory: showUsageHistory,
+            automaticallyUpdates: automaticallyUpdates
         )
         try credentialStore.save(credentials, for: validatedProfile.id)
         if let index = profiles.firstIndex(where: { $0.id == validatedProfile.id }) {

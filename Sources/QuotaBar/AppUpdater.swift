@@ -52,7 +52,12 @@ enum AppUpdaterError: LocalizedError {
     case missingDMG
     case missingChecksum
     case checksumMismatch
-    case downloadsUnavailable
+    case notInstalledInApplications
+    case installationNotWritable
+    case diskImageFailed
+    case applicationMissing
+    case invalidApplication
+    case installerLaunchFailed
 
     var errorDescription: String? {
         switch self {
@@ -69,9 +74,19 @@ enum AppUpdaterError: LocalizedError {
         case .missingChecksum:
             return "最新版本缺少 SHA-256 校验文件"
         case .checksumMismatch:
-            return "安装包校验失败，已取消打开"
-        case .downloadsUnavailable:
-            return "无法访问下载文件夹"
+            return "安装包校验失败，已取消安装"
+        case .notInstalledInApplications:
+            return "请先将 QuotaBar 安装到“应用程序”文件夹"
+        case .installationNotWritable:
+            return "没有更新“应用程序”中 QuotaBar 的权限"
+        case .diskImageFailed:
+            return "无法打开更新安装包"
+        case .applicationMissing:
+            return "安装包中没有找到 QuotaBar.app"
+        case .invalidApplication:
+            return "安装包中的应用身份、版本或签名无效"
+        case .installerLaunchFailed:
+            return "无法启动自动安装程序"
         }
     }
 }
@@ -179,17 +194,63 @@ actor AppUpdater {
         guard (200..<300).contains(response.statusCode) else {
             throw AppUpdaterError.httpStatus(response.statusCode)
         }
-        guard let downloads = fileManager.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
-            throw AppUpdaterError.downloadsUnavailable
-        }
-
-        let destination = uniqueDestination(in: downloads, fileName: release.fileName)
+        let destination = fileManager.temporaryDirectory.appending(
+            path: "QuotaBar-update-\(UUID().uuidString).dmg"
+        )
         try fileManager.moveItem(at: temporaryURL, to: destination)
         guard try sha256(of: destination) == expectedChecksum else {
             try? fileManager.removeItem(at: destination)
             throw AppUpdaterError.checksumMismatch
         }
         return destination
+    }
+
+    func installAndRelaunch(_ release: UpdateRelease) async throws {
+        let dmgURL = try await download(release)
+        defer { try? fileManager.removeItem(at: dmgURL) }
+        let currentApp = Bundle.main.bundleURL.standardizedFileURL
+        guard currentApp.path.hasPrefix("/Applications/"), currentApp.pathExtension == "app" else {
+            throw AppUpdaterError.notInstalledInApplications
+        }
+        guard fileManager.isWritableFile(atPath: currentApp.deletingLastPathComponent().path) else {
+            throw AppUpdaterError.installationNotWritable
+        }
+
+        let mountDirectory = fileManager.temporaryDirectory
+            .appending(path: "QuotaBar-update-mount-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try fileManager.createDirectory(at: mountDirectory, withIntermediateDirectories: true)
+        defer {
+            try? Self.run("/usr/bin/hdiutil", ["detach", mountDirectory.path, "-quiet"])
+            try? fileManager.removeItem(at: mountDirectory)
+        }
+        do {
+            try Self.run("/usr/bin/hdiutil", [
+                "attach", dmgURL.path, "-readonly", "-nobrowse", "-noautoopen",
+                "-mountpoint", mountDirectory.path
+            ])
+        } catch {
+            throw AppUpdaterError.diskImageFailed
+        }
+
+        let mountedApp = mountDirectory.appending(path: "QuotaBar.app", directoryHint: .isDirectory)
+        guard fileManager.fileExists(atPath: mountedApp.path) else {
+            throw AppUpdaterError.applicationMissing
+        }
+        guard Bundle(url: mountedApp)?.bundleIdentifier == Bundle.main.bundleIdentifier,
+              Bundle(url: mountedApp)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String == release.version,
+              (try? Self.run("/usr/bin/codesign", ["--verify", "--deep", "--strict", mountedApp.path])) != nil else {
+            throw AppUpdaterError.invalidApplication
+        }
+
+        let parent = currentApp.deletingLastPathComponent()
+        let stagedApp = parent.appending(path: ".QuotaBar-update-\(UUID().uuidString).app")
+        try Self.run("/usr/bin/ditto", [mountedApp.path, stagedApp.path])
+        guard Bundle(url: stagedApp)?.bundleIdentifier == Bundle.main.bundleIdentifier else {
+            try? fileManager.removeItem(at: stagedApp)
+            throw AppUpdaterError.invalidApplication
+        }
+        try launchInstaller(stagedApp: stagedApp, currentApp: currentApp)
+        await MainActor.run { NSApplication.shared.terminate(nil) }
     }
 
     private func fetchChecksum(for release: UpdateRelease) async throws -> String {
@@ -266,18 +327,72 @@ actor AppUpdater {
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    private func uniqueDestination(in directory: URL, fileName: String) -> URL {
-        let original = directory.appending(path: fileName)
-        guard fileManager.fileExists(atPath: original.path) else { return original }
-
-        let base = original.deletingPathExtension().lastPathComponent
-        let fileExtension = original.pathExtension
-        var index = 2
-        while true {
-            let candidate = directory.appending(path: "\(base)-\(index).\(fileExtension)")
-            if !fileManager.fileExists(atPath: candidate.path) { return candidate }
-            index += 1
+    private func launchInstaller(stagedApp: URL, currentApp: URL) throws {
+        let helperURL = fileManager.temporaryDirectory
+            .appending(path: "QuotaBar-update-\(UUID().uuidString).sh")
+        let backupApp = currentApp.deletingLastPathComponent()
+            .appending(path: ".QuotaBar-previous-\(UUID().uuidString).app")
+        let logURL = fileManager.temporaryDirectory.appending(path: "QuotaBar-update.log")
+        let script = """
+        #!/bin/zsh
+        set -u
+        old_pid=\(ProcessInfo.processInfo.processIdentifier)
+        staged=\(Self.shellQuote(stagedApp.path))
+        current=\(Self.shellQuote(currentApp.path))
+        backup=\(Self.shellQuote(backupApp.path))
+        log=\(Self.shellQuote(logURL.path))
+        exec >> "$log" 2>&1
+        for _ in {1..120}; do
+          kill -0 "$old_pid" 2>/dev/null || break
+          sleep 0.25
+        done
+        if kill -0 "$old_pid" 2>/dev/null; then exit 1; fi
+        /bin/mv "$current" "$backup" || exit 2
+        if /bin/mv "$staged" "$current"; then
+          /usr/bin/xattr -cr "$current"
+          /usr/bin/open "$current"
+          sleep 3
+          if /usr/bin/pgrep -f "^$current/Contents/MacOS/QuotaBar$" >/dev/null; then
+            /bin/rm -rf "$backup"
+            /bin/rm -f "$0"
+            exit 0
+          fi
+        fi
+        /bin/rm -rf "$current"
+        /bin/mv "$backup" "$current"
+        /usr/bin/open "$current"
+        exit 3
+        """
+        try Data(script.utf8).write(to: helperURL, options: .atomic)
+        try fileManager.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o700)],
+            ofItemAtPath: helperURL.path
+        )
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = [helperURL.path]
+        do {
+            try process.run()
+        } catch {
+            try? fileManager.removeItem(at: stagedApp)
+            try? fileManager.removeItem(at: helperURL)
+            throw AppUpdaterError.installerLaunchFailed
         }
+    }
+
+    private nonisolated static func run(_ executable: String, _ arguments: [String]) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw AppUpdaterError.invalidApplication }
+    }
+
+    private nonisolated static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }
 

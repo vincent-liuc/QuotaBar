@@ -2,13 +2,23 @@ import AppKit
 
 @MainActor
 enum StatusRingRenderer {
-    static func image(progress: Double?, phase: UsagePhase, wavePhase: Double = 0) -> NSImage {
+    static func image(
+        progress: Double?,
+        phase: UsagePhase,
+        wavePhase: Double = 0,
+        tailPhase: Double = 0
+    ) -> NSImage {
         let size = NSSize(width: 20, height: 20)
         let image = NSImage(size: size, flipped: false) { rect in
             if let progress {
-                drawCat(progress: progress, wavePhase: wavePhase, in: rect.insetBy(dx: 1, dy: 1))
+                drawCat(
+                    progress: progress,
+                    wavePhase: wavePhase,
+                    tailPhase: tailPhase,
+                    in: rect.insetBy(dx: 1, dy: 1)
+                )
             } else {
-                drawCat(progress: 0, wavePhase: wavePhase, in: rect.insetBy(dx: 1, dy: 1))
+                drawCat(progress: 0, wavePhase: wavePhase, tailPhase: tailPhase, in: rect.insetBy(dx: 1, dy: 1))
                 drawStateIndicator(for: phase, in: rect)
             }
             return true
@@ -17,9 +27,22 @@ enum StatusRingRenderer {
         return image
     }
 
-    private static func drawCat(progress: Double, wavePhase: Double, in rect: NSRect) {
+    private static func drawCat(progress: Double, wavePhase: Double, tailPhase: Double, in rect: NSRect) {
         let bounded = min(max(progress, 0), 1)
         let catRect = fittedCatRect(in: rect)
+        drawCatTemplate(in: catRect)
+        redrawAnimatedTail(in: catRect, tailPhase: tailPhase)
+        if bounded > 0, let context = NSGraphicsContext.current?.cgContext {
+            context.saveGState()
+            waveClip(progress: bounded, wavePhase: wavePhase, in: catRect).addClip()
+            context.setBlendMode(.sourceAtop)
+            NSColor.systemGreen.setFill()
+            NSBezierPath(rect: catRect).fill()
+            context.restoreGState()
+        }
+    }
+
+    private static func drawCatTemplate(in catRect: NSRect) {
         catTemplate.draw(
             in: catRect,
             from: NSRect(origin: .zero, size: catTemplate.size),
@@ -28,30 +51,49 @@ enum StatusRingRenderer {
             respectFlipped: true,
             hints: [.interpolation: NSImageInterpolation.high]
         )
-        if bounded > 0, let context = NSGraphicsContext.current?.cgContext {
-            context.saveGState()
-            let fillTop = catRect.minY + catRect.height * bounded
-            let amplitude = min(catRect.height * 0.045, 0.8)
-            let wave = NSBezierPath()
-            wave.move(to: NSPoint(x: catRect.minX, y: catRect.minY))
-            wave.line(to: NSPoint(x: catRect.maxX, y: catRect.minY))
-            wave.line(to: NSPoint(x: catRect.maxX, y: fillTop))
-            let segments = 16
-            for index in stride(from: segments, through: 0, by: -1) {
-                let fraction = CGFloat(index) / CGFloat(segments)
-                let angle = Double(fraction) * .pi * 2 + wavePhase
-                wave.line(to: NSPoint(
-                    x: catRect.minX + catRect.width * fraction,
-                    y: fillTop + CGFloat(sin(angle)) * amplitude
-                ))
-            }
-            wave.close()
-            wave.addClip()
-            context.setBlendMode(.sourceAtop)
-            NSColor.systemGreen.setFill()
-            NSBezierPath(rect: catRect).fill()
-            context.restoreGState()
+    }
+
+    private static func redrawAnimatedTail(in catRect: NSRect, tailPhase: Double) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let tailRegion = NSRect(
+            x: catRect.minX + catRect.width * 0.67,
+            y: catRect.minY,
+            width: catRect.width * 0.34,
+            height: catRect.height * 0.39
+        )
+        let pivot = NSPoint(
+            x: catRect.minX + catRect.width * 0.69,
+            y: catRect.minY + catRect.height * 0.28
+        )
+        let angle = CGFloat(sin(tailPhase)) * 3 * .pi / 180
+        context.saveGState()
+        context.clear(tailRegion.insetBy(dx: -0.5, dy: -0.5))
+        NSBezierPath(rect: tailRegion.insetBy(dx: -0.5, dy: -0.5)).addClip()
+        context.translateBy(x: pivot.x, y: pivot.y)
+        context.rotate(by: angle)
+        context.translateBy(x: -pivot.x, y: -pivot.y)
+        drawCatTemplate(in: catRect)
+        context.restoreGState()
+    }
+
+    private static func waveClip(progress: Double, wavePhase: Double, in rect: NSRect) -> NSBezierPath {
+        let fillTop = rect.minY + rect.height * progress
+        let amplitude = min(rect.height * 0.045, 0.8)
+        let wave = NSBezierPath()
+        wave.move(to: NSPoint(x: rect.minX, y: rect.minY))
+        wave.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+        wave.line(to: NSPoint(x: rect.maxX, y: fillTop))
+        let segments = 16
+        for index in stride(from: segments, through: 0, by: -1) {
+            let fraction = CGFloat(index) / CGFloat(segments)
+            let angle = Double(fraction) * .pi * 2 + wavePhase
+            wave.line(to: NSPoint(
+                x: rect.minX + rect.width * fraction,
+                y: fillTop + CGFloat(sin(angle)) * amplitude
+            ))
         }
+        wave.close()
+        return wave
     }
 
     private static func fittedCatRect(in rect: NSRect) -> NSRect {

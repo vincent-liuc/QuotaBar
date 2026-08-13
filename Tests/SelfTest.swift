@@ -16,9 +16,10 @@ enum SelfTest {
         try await testOptionalEndpointDegradation()
         testLegacyDefaultsMigration()
         testStatusCatFill()
+        testDailyUpdateSchedule()
         testWeeklyResetCalculation()
         try testCredentialFileStorage()
-        print("Self-test passed: 14 checks")
+        print("Self-test passed: 15 checks")
     }
 
     private static func testDecodesUsageHistory() throws {
@@ -73,7 +74,8 @@ enum SelfTest {
     private static func testWeeklyUsageAndProgress() {
         let keys = [
             usageKey(id: 2, total: 100, used: 25, today: 5, status: "disabled"),
-            usageKey(id: 1, total: 400, used: 100, today: 10)
+            usageKey(id: 1, total: 400, used: 100, today: 10),
+            usageKey(id: 3, total: 50, used: 5, today: 1, status: "inactive")
         ]
         let normal = UsageSnapshot(
             weeklyUsage: WeeklyUsage(used: 90, total: 300),
@@ -92,8 +94,8 @@ enum SelfTest {
         require(normal.total == 300, "subscription weekly total")
         require(normal.used == 90, "subscription weekly used")
         require(normal.remaining == 210, "subscription weekly remaining")
-        require(normal.keys.count == 1, "active key count")
-        require(normal.keys.map(\.id) == [1], "inactive keys excluded from snapshot")
+        require(normal.keys.count == 2, "all non-inactive keys retained")
+        require(normal.keys.map(\.id) == [1, 2], "only inactive keys excluded from snapshot")
         require(over.progress == 1, "over-quota progress")
         require(over.remaining == 0, "remaining lower bound")
         require(over.isOverQuota, "over-quota flag")
@@ -116,12 +118,14 @@ enum SelfTest {
             launchAtLogin: true,
             showAPIKeyDetails: false,
             showMetricCards: false,
-            showUsageHistory: false
+            showUsageHistory: false,
+            automaticallyUpdates: false
         )
         require(preferences.launchAtLogin, "launch-at-login preference")
         require(!preferences.showAPIKeyDetails, "API key details preference")
         require(!preferences.showMetricCards, "metric cards preference")
         require(!preferences.showUsageHistory, "usage history preference")
+        require(!preferences.automaticallyUpdates, "automatic update preference")
 
         let suiteName = "dev.ruobin.QuotaBar.SelfTest.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -131,6 +135,7 @@ enum SelfTest {
         require(initial.showAPIKeyDetails, "API key details default enabled")
         require(initial.showMetricCards, "metric cards default enabled")
         require(initial.showUsageHistory, "usage history default enabled")
+        require(initial.automaticallyUpdates, "automatic updates default enabled")
         store.save(preferences)
         require(store.load() == preferences, "display preferences persisted")
     }
@@ -174,6 +179,8 @@ enum SelfTest {
         let full = bitmap(1)
         let waveA = StatusRingRenderer.image(progress: 0.5, phase: .ready, wavePhase: 0)
         let waveB = StatusRingRenderer.image(progress: 0.5, phase: .ready, wavePhase: .pi / 2)
+        let tailA = StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: 0)
+        let tailB = StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: .pi / 2)
         let split = max(ten.pixelsHigh / 2, 1)
         require(greenPixels(empty, rows: 0..<empty.pixelsHigh) == 0, "zero usage cat remains black")
         require(greenPixels(ten, rows: 0..<ten.pixelsHigh) > 0, "ten percent cat has green fill")
@@ -183,6 +190,20 @@ enum SelfTest {
         require(greenPixels(full, rows: 0..<full.pixelsHigh) > greenPixels(ten, rows: 0..<ten.pixelsHigh), "full cat has more green fill")
         require(empty.colorAt(x: 0, y: 0)?.alphaComponent == 0, "status icon has no outer background")
         require(waveA.tiffRepresentation != waveB.tiffRepresentation, "wave phase animates green surface")
+        require(tailA.tiffRepresentation != tailB.tiffRepresentation, "tail phase animates tail")
+    }
+
+    private static func testDailyUpdateSchedule() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let formatter = ISO8601DateFormatter()
+        let morning = formatter.date(from: "2026-08-13T03:00:00Z")!
+        let noon = formatter.date(from: "2026-08-13T04:00:00Z")!
+        let afternoon = formatter.date(from: "2026-08-13T05:00:00Z")!
+        require(DailyUpdateSchedule.nextNoon(after: morning, calendar: calendar) == noon, "update schedules today's noon")
+        require(!DailyUpdateSchedule.isDue(now: morning, lastCheck: nil, calendar: calendar), "automatic update waits until noon")
+        require(DailyUpdateSchedule.isDue(now: afternoon, lastCheck: nil, calendar: calendar), "automatic update catches missed noon")
+        require(!DailyUpdateSchedule.isDue(now: afternoon, lastCheck: noon, calendar: calendar), "automatic update runs once per day")
     }
 
     private static func testWeeklyResetCalculation() {
@@ -436,8 +457,8 @@ enum SelfTest {
         )
 
         require(requestedPages.values == [1, 2], "all pages requested")
-        require(requestedUsageIDs.values == [1, 2], "today usage requested for active keys only")
-        require(usage.keys.map(\.id) == [1, 2], "inactive keys excluded")
+        require(requestedUsageIDs.values == [1, 2, 3], "today usage excludes inactive keys only")
+        require(usage.keys.map(\.id) == [1, 2, 3], "only inactive keys excluded")
         require(usage.keys.first(where: { $0.id == 2 })?.quotaUsed == 25, "duplicate key refreshed")
         require(usage.keys.first(where: { $0.id == 2 })?.todayActualCost == 8.5, "today usage merged by key id")
         require(usage.keys.first(where: { $0.id == 1 })?.todayActualCost == 0, "missing stat is zero when endpoint succeeds")

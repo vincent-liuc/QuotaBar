@@ -10,6 +10,8 @@ contents_dir="$bundle_dir/Contents"
 output_zip="$project_dir/outputs/QuotaBar-macOS.zip"
 source_zip="$project_dir/outputs/QuotaBar-source.zip"
 architectures=(--arch arm64 --arch x86_64)
+app_version="${QUOTABAR_VERSION:-1.11.4}"
+app_build="${QUOTABAR_BUILD:-19}"
 
 cd "$project_dir"
 zsh scripts/build-icon.sh
@@ -22,7 +24,7 @@ mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$binary_path" "$contents_dir/MacOS/QuotaBar"
 cp "$project_dir/Assets/AppIcon.icns" "$contents_dir/Resources/AppIcon.icns"
 
-cat > "$contents_dir/Info.plist" <<'PLIST'
+cat > "$contents_dir/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -44,9 +46,9 @@ cat > "$contents_dir/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.11.3</string>
+    <string>$app_version</string>
     <key>CFBundleVersion</key>
-    <string>18</string>
+    <string>$app_build</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>

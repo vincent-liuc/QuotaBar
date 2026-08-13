@@ -67,11 +67,12 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let showAPIKeyDetailsSwitch = NSSwitch()
     private let showMetricCardsSwitch = NSSwitch()
     private let showUsageHistorySwitch = NSSwitch()
+    private let automaticallyUpdatesSwitch = NSSwitch()
     private let messageLabel = settingsLabel("", size: 11, color: .systemRed)
     private let connectionLabel = settingsLabel("尚未检测", size: 11, color: .secondaryLabelColor)
     private let testButton = NSButton(title: "测试连接", target: nil, action: nil)
     private let updateStatusLabel = settingsLabel("尚未检查", size: 11, color: .secondaryLabelColor)
-    private let updateButton = NSButton(title: "检查更新", target: nil, action: nil)
+    private let updateButton = NSButton(title: "立即更新", target: nil, action: nil)
     private let tabContainer = NSView()
     private var tabButtons: [SettingsTabButton] = []
     private var tabViews: [NSView] = []
@@ -162,6 +163,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         showAPIKeyDetailsSwitch.state = store.preferences.showAPIKeyDetails ? .on : .off
         showMetricCardsSwitch.state = store.preferences.showMetricCards ? .on : .off
         showUsageHistorySwitch.state = store.preferences.showUsageHistory ? .on : .off
+        automaticallyUpdatesSwitch.state = store.preferences.automaticallyUpdates ? .on : .off
 
         let timezoneIDs = ["Asia/Shanghai", TimeZone.current.identifier, "UTC"].uniqued()
         timezonePopup.addItems(withTitles: timezoneIDs)
@@ -170,7 +172,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         timezonePopup.action = #selector(profileSelectionChanged)
         subscriptionPopup.target = self
         subscriptionPopup.action = #selector(profileSelectionChanged)
-        [launchAtLoginSwitch, showAPIKeyDetailsSwitch, showMetricCardsSwitch, showUsageHistorySwitch].forEach {
+        [launchAtLoginSwitch, showAPIKeyDetailsSwitch, showMetricCardsSwitch, showUsageHistorySwitch, automaticallyUpdatesSwitch].forEach {
             $0.target = self
             $0.action = #selector(preferenceControlChanged)
         }
@@ -316,6 +318,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             sectionTitle("软件更新"),
             settingsPanel([
                 settingsRow(title: "当前版本", control: version),
+                settingsRow(title: "自动更新", control: automaticallyUpdatesSwitch),
                 settingsRow(title: "版本更新", control: updateButton)
             ]),
             updateStatusLabel
@@ -666,7 +669,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
                 launchAtLogin: launchAtLoginSwitch.state == .on,
                 showAPIKeyDetails: showAPIKeyDetailsSwitch.state == .on,
                 showMetricCards: showMetricCardsSwitch.state == .on,
-                showUsageHistory: showUsageHistorySwitch.state == .on
+                showUsageHistory: showUsageHistorySwitch.state == .on,
+                automaticallyUpdates: automaticallyUpdatesSwitch.state == .on
             ))
             clearMessage()
         } catch {
@@ -712,14 +716,13 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
                 switch try await updater.checkForUpdate(currentVersion: AppVersionInfo.version) {
                 case .upToDate(let version): updateStatusLabel.stringValue = "已是最新版本 \(version)"
                 case .available(let release):
-                    updateButton.title = "下载中…"
-                    updateStatusLabel.stringValue = "正在下载 \(release.version)"
-                    let fileURL = try await updater.download(release)
-                    updateStatusLabel.stringValue = "已下载 \(release.version)"
-                    NSWorkspace.shared.open(fileURL)
+                    updateButton.title = "安装中…"
+                    updateStatusLabel.stringValue = "正在下载并安装 \(release.version)"
+                    try await updater.installAndRelaunch(release)
+                    updateStatusLabel.stringValue = "正在重启 \(release.version)"
                 }
             } catch { updateStatusLabel.stringValue = error.localizedDescription }
-            updateButton.title = "检查更新"
+            updateButton.title = "立即更新"
             updateButton.isEnabled = true
         }
     }

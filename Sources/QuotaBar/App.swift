@@ -51,7 +51,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var contentController: UsagePopoverController!
     private var preferencesController: PreferencesWindowController?
     private var statusAnimationTimer: Timer?
+    private var automaticUpdateCoordinator: AutomaticUpdateCoordinator?
     private var wavePhase = 0.0
+    private var tailPhase = 0.0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDataMigration.migrateLegacyDefaultsIfNeeded()
@@ -73,11 +75,15 @@ final class AppController: NSObject, NSApplicationDelegate {
             self?.refreshUI()
         }
         refreshUI()
+        automaticUpdateCoordinator = AutomaticUpdateCoordinator()
+        automaticUpdateCoordinator?.start()
         statusAnimationTimer = Timer.scheduledTimer(withTimeInterval: 0.28, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, let progress = self.store.snapshot?.progress,
-                      progress > 0, progress < 1 else { return }
-                self.wavePhase += .pi / 5
+                guard let self else { return }
+                if let progress = self.store.snapshot?.progress, progress > 0, progress < 1 {
+                    self.wavePhase += .pi / 5
+                }
+                self.tailPhase += .pi / 12
                 self.refreshStatusIcon()
             }
         }
@@ -126,7 +132,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         statusItem.button?.image = StatusRingRenderer.image(
             progress: store.snapshot.flatMap { $0.hasWeeklyUsage ? $0.progress : nil },
             phase: store.phase,
-            wavePhase: wavePhase
+            wavePhase: wavePhase,
+            tailPhase: tailPhase
         )
     }
 

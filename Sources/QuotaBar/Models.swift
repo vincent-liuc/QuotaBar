@@ -189,7 +189,9 @@ struct UsageKey: Decodable, Equatable, Sendable {
         return min(max(quotaUsed / quota, 0), 1)
     }
 
-    var isActive: Bool { status == "active" }
+    var isVisible: Bool {
+        status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "inactive"
+    }
     var concurrency: Int { max(currentConcurrency ?? 0, 0) }
 }
 
@@ -222,7 +224,7 @@ struct UsageSnapshot: Equatable, Sendable {
         usageRecords: [UsageRecord]? = nil,
         fetchedAt: Date = Date()
     ) {
-        self.keys = keys.filter(\.isActive).sorted { lhs, rhs in
+        self.keys = keys.filter(\.isVisible).sorted { lhs, rhs in
             if (lhs.todayActualCost ?? -1) != (rhs.todayActualCost ?? -1) {
                 return (lhs.todayActualCost ?? -1) > (rhs.todayActualCost ?? -1)
             }

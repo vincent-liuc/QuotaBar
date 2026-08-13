@@ -107,7 +107,7 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
     }
 
     private func fetchUsage(profile: StationProfile, token: String) async throws -> UsageData {
-        let keys = try await fetchAllKeys(profile: profile, token: token).filter(\.isActive)
+        let keys = try await fetchAllKeys(profile: profile, token: token).filter(\.isVisible)
         async let subscriptions = optional { try await self.fetchSubscriptions(profile: profile, token: token) }
         async let accountMetrics = optional { try await self.fetchAccountMetrics(profile: profile, token: token) }
         async let todayUsage = optional {
