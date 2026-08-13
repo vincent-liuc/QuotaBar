@@ -87,6 +87,18 @@ struct APIKeyUsagePayload: Codable, Sendable {
     }
 }
 
+struct ResetAPIKeyQuotaPayload: Encodable, Sendable {
+    let resetQuota = true
+
+    enum CodingKeys: String, CodingKey {
+        case resetQuota = "reset_quota"
+    }
+}
+
+struct IgnoredAPIData: Decodable, Sendable {
+    init(from decoder: Decoder) throws {}
+}
+
 struct APIKeyUsageData: Decodable, Sendable {
     let stats: [String: APIKeyUsageStat]
 }
@@ -141,11 +153,13 @@ struct SubscriptionRecord: Decodable, Sendable {
 }
 
 struct WeeklyUsage: Equatable, Sendable {
+    let subscriptionID: Int?
     let used: Double
     let total: Double
     let resetAt: Date?
 
-    init(used: Double, total: Double, resetAt: Date? = nil) {
+    init(subscriptionID: Int? = nil, used: Double, total: Double, resetAt: Date? = nil) {
+        self.subscriptionID = subscriptionID
         self.used = used
         self.total = total
         self.resetAt = resetAt

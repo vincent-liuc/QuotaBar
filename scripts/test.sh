@@ -19,6 +19,7 @@ swiftc \
   "$project_dir/Sources/QuotaBar/APIClient.swift" \
   "$project_dir/Sources/QuotaBar/AppUpdater.swift" \
   "$project_dir/Sources/QuotaBar/AutomaticUpdateCoordinator.swift" \
+  "$project_dir/Sources/QuotaBar/WeeklyResetMonitor.swift" \
   "$project_dir/Sources/QuotaBar/CredentialStore.swift" \
   "$project_dir/Sources/QuotaBar/StatusRingRenderer.swift" \
   "$project_dir/Tests/SelfTest.swift" \

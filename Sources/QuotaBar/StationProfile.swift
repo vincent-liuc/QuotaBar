@@ -47,8 +47,14 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
     var apiPath: String
     var timezone: String
     var subscriptionSelection: SubscriptionSelection
+    var automaticallyResetsAPIKeyQuota: Bool
     var capabilities: Set<StationCapability>
     var lastCheckedAt: Date?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, serviceURL, apiPath, timezone, subscriptionSelection
+        case automaticallyResetsAPIKeyQuota, capabilities, lastCheckedAt
+    }
 
     init(
         id: UUID = UUID(),
@@ -57,6 +63,7 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
         apiPath: String = Self.defaultAPIPath,
         timezone: String = TimeZone.current.identifier,
         subscriptionSelection: SubscriptionSelection = .automatic,
+        automaticallyResetsAPIKeyQuota: Bool = false,
         capabilities: Set<StationCapability> = [],
         lastCheckedAt: Date? = nil
     ) {
@@ -66,8 +73,25 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
         self.apiPath = apiPath
         self.timezone = timezone
         self.subscriptionSelection = subscriptionSelection
+        self.automaticallyResetsAPIKeyQuota = automaticallyResetsAPIKeyQuota
         self.capabilities = capabilities
         self.lastCheckedAt = lastCheckedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        serviceURL = try container.decode(String.self, forKey: .serviceURL)
+        apiPath = try container.decode(String.self, forKey: .apiPath)
+        timezone = try container.decode(String.self, forKey: .timezone)
+        subscriptionSelection = try container.decode(SubscriptionSelection.self, forKey: .subscriptionSelection)
+        automaticallyResetsAPIKeyQuota = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .automaticallyResetsAPIKeyQuota
+        ) ?? false
+        capabilities = try container.decodeIfPresent(Set<StationCapability>.self, forKey: .capabilities) ?? []
+        lastCheckedAt = try container.decodeIfPresent(Date.self, forKey: .lastCheckedAt)
     }
 
     static func legacyDefault() -> StationProfile {

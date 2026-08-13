@@ -77,16 +77,17 @@ final class AppController: NSObject, NSApplicationDelegate {
         refreshUI()
         automaticUpdateCoordinator = AutomaticUpdateCoordinator()
         automaticUpdateCoordinator?.start()
-        statusAnimationTimer = Timer.scheduledTimer(withTimeInterval: 0.28, repeats: true) { [weak self] _ in
+        statusAnimationTimer = Timer(timeInterval: 0.16, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 if let progress = self.store.snapshot?.progress, progress > 0, progress < 1 {
                     self.wavePhase += .pi / 5
                 }
-                self.tailPhase += .pi / 12
+                self.tailPhase += .pi / 8
                 self.refreshStatusIcon()
             }
         }
+        RunLoop.main.add(statusAnimationTimer!, forMode: .common)
 
         if store.needsConfiguration {
             DispatchQueue.main.async { [weak self] in
@@ -129,12 +130,14 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func refreshStatusIcon() {
-        statusItem.button?.image = StatusRingRenderer.image(
+        guard let button = statusItem.button else { return }
+        button.image = StatusRingRenderer.image(
             progress: store.snapshot.flatMap { $0.hasWeeklyUsage ? $0.progress : nil },
             phase: store.phase,
             wavePhase: wavePhase,
             tailPhase: tailPhase
         )
+        button.needsDisplay = true
     }
 
     private func showPreferences() {

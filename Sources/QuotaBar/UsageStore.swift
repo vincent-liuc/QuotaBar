@@ -14,6 +14,7 @@ final class UsageStore {
     private let profileStore: StationProfileStore
     private let preferencesStore: PreferencesStore
     private let launchAtLoginManager: LaunchAtLoginManager
+    private let weeklyResetMonitor: WeeklyResetMonitor
     private(set) var preferences: UserPreferences
     private(set) var settingsMessage: String?
     private var pollingTask: Task<Void, Never>?
@@ -24,13 +25,15 @@ final class UsageStore {
         credentialStore: CredentialStore = CredentialStore(),
         profileStore: StationProfileStore = StationProfileStore(),
         preferencesStore: PreferencesStore = PreferencesStore(),
-        launchAtLoginManager: LaunchAtLoginManager = LaunchAtLoginManager()
+        launchAtLoginManager: LaunchAtLoginManager = LaunchAtLoginManager(),
+        weeklyResetMonitor: WeeklyResetMonitor = WeeklyResetMonitor()
     ) {
         self.client = client
         self.credentialStore = credentialStore
         self.profileStore = profileStore
         self.preferencesStore = preferencesStore
         self.launchAtLoginManager = launchAtLoginManager
+        self.weeklyResetMonitor = weeklyResetMonitor
         preferences = preferencesStore.load()
         loadProfilesAndMigrate()
         applyLaunchAtLoginPreference()
@@ -190,6 +193,7 @@ final class UsageStore {
         settingsMessage = nil
         guard profiles.count > 1 else { throw StationProfileError.cannotDeleteOnlyStation }
         try credentialStore.delete(for: id)
+        weeklyResetMonitor.removeObservation(for: id)
         profiles.removeAll { $0.id == id }
         if activeProfileID == id { activeProfileID = profiles.first?.id }
         try persistProfiles()
@@ -213,7 +217,40 @@ final class UsageStore {
         onChange?()
         defer { isRefreshing = false; onChange?() }
         do {
-            let usage = try await client.fetchUsage(profile: profile, credentials: credentials)
+            var usage = try await client.fetchUsage(profile: profile, credentials: credentials)
+            if let weeklyUsage = usage.weeklyUsage {
+                let keyIDs = weeklyResetMonitor.resetPlan(
+                    profileID: profile.id,
+                    subscriptionID: weeklyUsage.subscriptionID,
+                    resetAt: weeklyUsage.resetAt,
+                    enabled: profile.automaticallyResetsAPIKeyQuota,
+                    visibleKeyIDs: usage.keys.filter(\.isVisible).map(\.id)
+                )
+                var resetSucceeded = false
+                var resetFailed = false
+                for keyID in keyIDs {
+                    do {
+                        try await client.resetAPIKeyQuota(
+                            profile: profile,
+                            credentials: credentials,
+                            keyID: keyID
+                        )
+                        weeklyResetMonitor.markKeyHandled(profileID: profile.id, keyID: keyID)
+                        resetSucceeded = true
+                    } catch {
+                        resetFailed = true
+                        NSLog("QuotaBar API key %d quota reset failed: %@", keyID, error.localizedDescription)
+                    }
+                }
+                if resetSucceeded {
+                    usage = try await client.fetchUsage(profile: profile, credentials: credentials)
+                }
+                if resetFailed {
+                    settingsMessage = "API Key 用量自动重置失败，将在下次刷新时重试"
+                } else if !keyIDs.isEmpty {
+                    settingsMessage = nil
+                }
+            }
             snapshot = UsageSnapshot(
                 weeklyUsage: usage.weeklyUsage,
                 accountMetrics: usage.accountMetrics,

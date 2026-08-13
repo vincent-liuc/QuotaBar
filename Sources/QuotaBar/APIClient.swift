@@ -20,6 +20,7 @@ enum APIClientError: LocalizedError, Equatable {
 
 protocol UsageFetching: Sendable {
     func fetchUsage(profile: StationProfile, credentials: Credentials) async throws -> UsageData
+    func resetAPIKeyQuota(profile: StationProfile, credentials: Credentials, keyID: Int) async throws
     func testLogin(profile: StationProfile, credentials: Credentials) async throws
     func testConnection(profile: StationProfile, credentials: Credentials) async throws -> ConnectionTestResult
     func invalidateSession() async
@@ -50,6 +51,22 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
             invalidateToken()
             let refreshedToken = try await validToken(profile: profile, credentials: credentials)
             return try await fetchUsage(profile: profile, token: refreshedToken)
+        }
+    }
+
+    func resetAPIKeyQuota(
+        profile: StationProfile,
+        credentials: Credentials,
+        keyID: Int
+    ) async throws {
+        let profile = try profile.validated()
+        let token = try await validToken(profile: profile, credentials: credentials)
+        do {
+            try await resetAPIKeyQuota(profile: profile, token: token, keyID: keyID)
+        } catch APIClientError.httpStatus(401), APIClientError.httpStatus(403) {
+            invalidateToken()
+            let refreshedToken = try await validToken(profile: profile, credentials: credentials)
+            try await resetAPIKeyQuota(profile: profile, token: refreshedToken, keyID: keyID)
         }
     }
 
@@ -163,6 +180,7 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         }
         guard let subscription, let total = subscription.weeklyLimitUSD else { return nil }
         return WeeklyUsage(
+            subscriptionID: subscription.id,
             used: max(subscription.weeklyUsageUSD ?? 0, 0),
             total: max(total, 0),
             resetAt: WeeklyResetCalculator.nextReset(
@@ -263,6 +281,15 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         var result: [Int: Double] = [:]
         for stat in envelope.data.stats.values { result[stat.apiKeyID] = max(stat.todayActualCost, 0) }
         return result
+    }
+
+    private func resetAPIKeyQuota(profile: StationProfile, token: String, keyID: Int) async throws {
+        var request = URLRequest(url: try endpoint(profile, "keys/\(keyID)"))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(ResetAPIKeyQuotaPayload())
+        let _: APIEnvelope<IgnoredAPIData> = try await send(request)
     }
 
     private func fetchAccountMetrics(profile: StationProfile, token: String) async throws -> AccountMetrics {

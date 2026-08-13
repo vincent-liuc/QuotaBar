@@ -54,6 +54,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let apiPathField = NSTextField()
     private let timezonePopup = NSPopUpButton()
     private let subscriptionPopup = NSPopUpButton()
+    private let automaticallyResetsAPIKeyQuotaSwitch = NSSwitch()
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let visiblePasswordField = NSTextField()
@@ -172,6 +173,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         timezonePopup.action = #selector(profileSelectionChanged)
         subscriptionPopup.target = self
         subscriptionPopup.action = #selector(profileSelectionChanged)
+        automaticallyResetsAPIKeyQuotaSwitch.target = self
+        automaticallyResetsAPIKeyQuotaSwitch.action = #selector(profileSelectionChanged)
         [launchAtLoginSwitch, showAPIKeyDetailsSwitch, showMetricCardsSwitch, showUsageHistorySwitch, automaticallyUpdatesSwitch].forEach {
             $0.target = self
             $0.action = #selector(preferenceControlChanged)
@@ -212,8 +215,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
     private func makeTabHeader() -> NSView {
         let tabs = [
-            ("站点", "server.rack"), ("账户", "person.crop.circle"),
-            ("通用", "gearshape"), ("显示", "rectangle.3.group"),
+            ("通用", "gearshape"), ("站点", "server.rack"),
+            ("账户", "person.crop.circle"), ("显示", "rectangle.3.group"),
             ("更新", "arrow.triangle.2.circlepath")
         ]
         tabButtons = tabs.enumerated().map { index, item in
@@ -239,7 +242,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func makeTabBody() -> NSView {
-        tabViews = [makeStationTab(), makeAccountTab(), makeGeneralTab(), makeDisplayTab(), makeUpdateTab()]
+        tabViews = [makeGeneralTab(), makeStationTab(), makeAccountTab(), makeDisplayTab(), makeUpdateTab()]
         for tab in tabViews {
             tab.translatesAutoresizingMaskIntoConstraints = false
             tabContainer.addSubview(tab)
@@ -255,6 +258,15 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func makeStationTab() -> NSView {
+        let resetInfo = NSImageView(image: settingsSymbol("info.circle", pointSize: 12))
+        resetInfo.contentTintColor = .tertiaryLabelColor
+        resetInfo.toolTip = "订阅用量重置后，自动重置所有未被禁用的APIKey已消耗用量"
+        resetInfo.setAccessibilityLabel("自动重置用量说明")
+        resetInfo.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        let resetControls = NSStackView(views: [resetInfo, automaticallyResetsAPIKeyQuotaSwitch])
+        resetControls.orientation = .horizontal
+        resetControls.alignment = .centerY
+        resetControls.spacing = 7
         return tabStack([
             sectionTitle("Sub2API 站点"),
             settingsPanel([
@@ -262,7 +274,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
                 fieldRow(title: "服务地址", field: serviceURLField),
                 fieldRow(title: "API 路径", field: apiPathField),
                 settingsRow(title: "时区", control: timezonePopup),
-                settingsRow(title: "订阅", control: subscriptionPopup)
+                settingsRow(title: "订阅", control: subscriptionPopup),
+                settingsRow(title: "自动重置用量", control: resetControls)
             ]),
             settingsRow(title: "兼容性检测", control: testButton),
             connectionLabel
@@ -455,6 +468,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         profile.serviceURL = serviceURLField.stringValue
         profile.apiPath = apiPathField.stringValue
         profile.timezone = timezonePopup.titleOfSelectedItem ?? TimeZone.current.identifier
+        profile.automaticallyResetsAPIKeyQuota = automaticallyResetsAPIKeyQuotaSwitch.state == .on
         if subscriptionPopup.indexOfSelectedItem <= 0 {
             profile.subscriptionSelection = .automatic
         } else if let id = subscriptionPopup.selectedItem?.representedObject as? Int {
@@ -484,6 +498,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         apiPathField.stringValue = profile.apiPath
         if timezonePopup.indexOfItem(withTitle: profile.timezone) < 0 { timezonePopup.addItem(withTitle: profile.timezone) }
         timezonePopup.selectItem(withTitle: profile.timezone)
+        automaticallyResetsAPIKeyQuotaSwitch.state = profile.automaticallyResetsAPIKeyQuota ? .on : .off
         let credentials = store.credentials(for: profile.id)
         emailField.stringValue = credentials?.email ?? ""
         passwordField.stringValue = credentials?.password ?? ""
@@ -541,7 +556,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         let profile = StationProfile(name: "新站点", serviceURL: "", timezone: TimeZone.current.identifier)
         profiles.append(profile)
         loadProfile(profile)
-        selectedTab = 0
+        selectedTab = 1
         updateSelectedTab()
     }
 
@@ -685,7 +700,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         messageLabel.stringValue = launchError ?? error.localizedDescription
         messageLabel.isHidden = false
         statusBarHeightConstraint?.constant = 30
-        selectTab(at: error is StationProfileError ? 0 : 1)
+        selectTab(at: error is StationProfileError ? 1 : 2)
     }
 
     private func clearMessage() {

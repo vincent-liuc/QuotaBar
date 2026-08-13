@@ -13,13 +13,15 @@ enum SelfTest {
         try await testUpdateCheckRetry()
         try await testLoginOnlyUsesLoginEndpoint()
         try await testPaginationAndDeduplication()
+        try await testAPIKeyQuotaResetRequest()
         try await testOptionalEndpointDegradation()
         testLegacyDefaultsMigration()
         testStatusCatFill()
         testDailyUpdateSchedule()
         testWeeklyResetCalculation()
+        testWeeklyResetMonitor()
         try testCredentialFileStorage()
-        print("Self-test passed: 15 checks")
+        print("Self-test passed: 17 checks")
     }
 
     private static func testDecodesUsageHistory() throws {
@@ -179,8 +181,8 @@ enum SelfTest {
         let full = bitmap(1)
         let waveA = StatusRingRenderer.image(progress: 0.5, phase: .ready, wavePhase: 0)
         let waveB = StatusRingRenderer.image(progress: 0.5, phase: .ready, wavePhase: .pi / 2)
-        let tailA = StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: 0)
-        let tailB = StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: .pi / 2)
+        let resting = bitmapImage(StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: .pi * 0.5))
+        let twitching = bitmapImage(StatusRingRenderer.image(progress: 0.5, phase: .ready, tailPhase: .pi))
         let split = max(ten.pixelsHigh / 2, 1)
         require(greenPixels(empty, rows: 0..<empty.pixelsHigh) == 0, "zero usage cat remains black")
         require(greenPixels(ten, rows: 0..<ten.pixelsHigh) > 0, "ten percent cat has green fill")
@@ -190,7 +192,29 @@ enum SelfTest {
         require(greenPixels(full, rows: 0..<full.pixelsHigh) > greenPixels(ten, rows: 0..<ten.pixelsHigh), "full cat has more green fill")
         require(empty.colorAt(x: 0, y: 0)?.alphaComponent == 0, "status icon has no outer background")
         require(waveA.tiffRepresentation != waveB.tiffRepresentation, "wave phase animates green surface")
-        require(tailA.tiffRepresentation != tailB.tiffRepresentation, "tail phase animates tail")
+        let topEnd = Int(ceil(Double(resting.pixelsHigh) * 0.34))
+        var changedTopPixels = 0
+        for y in 0..<topEnd {
+            for x in 0..<resting.pixelsWide where pixelsDiffer(resting, twitching, x: x, y: y) {
+                changedTopPixels += 1
+            }
+        }
+        require(changedTopPixels >= 2, "ear twitch visibly changes the 20px top silhouette")
+    }
+
+    private static func bitmapImage(_ image: NSImage) -> NSBitmapImageRep {
+        NSBitmapImageRep(data: image.tiffRepresentation!)!
+    }
+
+    private static func pixelsDiffer(_ lhs: NSBitmapImageRep, _ rhs: NSBitmapImageRep, x: Int, y: Int) -> Bool {
+        guard let left = lhs.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+              let right = rhs.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
+            return false
+        }
+        return abs(left.redComponent - right.redComponent) > 0.08
+            || abs(left.greenComponent - right.greenComponent) > 0.08
+            || abs(left.blueComponent - right.blueComponent) > 0.08
+            || abs(left.alphaComponent - right.alphaComponent) > 0.08
     }
 
     private static func testDailyUpdateSchedule() {
@@ -222,6 +246,97 @@ enum SelfTest {
             WeeklyResetCalculator.nextReset(windowStart: start, expiresAt: expiry, now: beforeReset) == nil,
             "subscription expiry suppresses later weekly reset"
         )
+    }
+
+    private static func testWeeklyResetMonitor() {
+        let suiteName = "dev.ruobin.QuotaBar.ResetMonitor.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let monitor = WeeklyResetMonitor(defaults: defaults)
+        let profileID = UUID()
+        let first = Date(timeIntervalSince1970: 1_800_000_000)
+        require(
+            monitor.resetPlan(
+                profileID: profileID, subscriptionID: 10, resetAt: first,
+                enabled: false, visibleKeyIDs: [105, 106]
+            ).isEmpty,
+            "disabled reset monitoring does nothing"
+        )
+        require(
+            monitor.resetPlan(
+                profileID: profileID, subscriptionID: 10, resetAt: first,
+                enabled: true, visibleKeyIDs: [105, 106]
+            ).isEmpty,
+            "first reset observation establishes baseline"
+        )
+        require(
+            monitor.resetPlan(
+                profileID: profileID,
+                subscriptionID: 10,
+                resetAt: first.addingTimeInterval(-60),
+                enabled: true,
+                visibleKeyIDs: [105, 106]
+            ).isEmpty,
+            "countdown decrease does not trigger reset"
+        )
+        let nextCycle = first.addingTimeInterval(7 * 86_400)
+        require(
+            monitor.resetPlan(
+                profileID: profileID, subscriptionID: 10, resetAt: nextCycle,
+                enabled: true, visibleKeyIDs: [106, 105]
+            ) == [105, 106],
+            "forward reset-time jump triggers quota reset"
+        )
+        monitor.markKeyHandled(profileID: profileID, keyID: 105)
+        require(
+            monitor.resetPlan(
+                profileID: profileID, subscriptionID: 10, resetAt: nextCycle,
+                enabled: true, visibleKeyIDs: [105]
+            ).isEmpty,
+            "inactive pending keys are dropped before retry"
+        )
+        require(
+            monitor.resetPlan(
+                profileID: profileID, subscriptionID: 11, resetAt: nextCycle,
+                enabled: true, visibleKeyIDs: [105, 106]
+            ).isEmpty,
+            "subscription change establishes a new baseline"
+        )
+    }
+
+    private static func testAPIKeyQuotaResetRequest() async throws {
+        let requestedIDs = LockedPages()
+        MockURLProtocol.requestHandler = { request in
+            let url = try requireURL(request)
+            if url.path.hasSuffix("/api/v1/auth/login") {
+                return mockResponse(
+                    url: url,
+                    json: #"{"code":0,"message":"success","data":{"access_token":"reset-token"}}"#
+                )
+            }
+            guard request.httpMethod == "PUT",
+                  request.value(forHTTPHeaderField: "Authorization") == "Bearer reset-token",
+                  let id = Int(url.lastPathComponent) else {
+                throw APIClientError.invalidResponse
+            }
+            let body = try requestBody(request)
+            let object = try JSONSerialization.jsonObject(with: body) as? [String: Bool]
+            require(object == ["reset_quota": true], "quota reset sends only reset_quota")
+            requestedIDs.append(id)
+            return mockResponse(
+                url: url,
+                json: #"{"code":0,"message":"success","data":{"id":1}}"#
+            )
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let client = APIClient(session: URLSession(configuration: configuration))
+        let profile = StationProfile(name: "Reset", serviceURL: "https://relay.example.com")
+        let credentials = Credentials(email: "test@example.com", password: "test")
+        try await client.resetAPIKeyQuota(profile: profile, credentials: credentials, keyID: 105)
+        try await client.resetAPIKeyQuota(profile: profile, credentials: credentials, keyID: 106)
+        require(requestedIDs.values == [105, 106], "all visible API key quotas reset")
     }
 
     private static func testCredentialFileStorage() throws {
@@ -258,6 +373,9 @@ enum SelfTest {
         require(profile.name == "Proxy", "station name normalized")
         require(profile.serviceURL == "https://relay.example.com/panel", "service URL normalized")
         require(profile.apiPath == "/api/v1", "API path normalized")
+        let legacyJSON = #"{"id":"00000000-0000-0000-0000-000000000001","name":"Legacy","serviceURL":"https://relay.example.com","apiPath":"/api/v1","timezone":"Asia/Shanghai","subscriptionSelection":{"mode":"automatic"},"capabilities":[]}"#
+        let legacy = try JSONDecoder().decode(StationProfile.self, from: Data(legacyJSON.utf8))
+        require(!legacy.automaticallyResetsAPIKeyQuota, "legacy station defaults automatic quota reset off")
         require(profile.apiBaseURL?.absoluteString == "https://relay.example.com/panel/api/v1", "path prefix preserved")
         require((try? StationProfile(name: "HTTP", serviceURL: "http://example.com").validated()) == nil, "HTTP rejected")
         require((try? StationProfile(name: "Secret", serviceURL: "https://user:pass@example.com").validated()) == nil, "URL credentials rejected")

@@ -10,8 +10,8 @@ contents_dir="$bundle_dir/Contents"
 output_zip="$project_dir/outputs/QuotaBar-macOS.zip"
 source_zip="$project_dir/outputs/QuotaBar-source.zip"
 architectures=(--arch arm64 --arch x86_64)
-app_version="${QUOTABAR_VERSION:-1.11.4}"
-app_build="${QUOTABAR_BUILD:-19}"
+app_version="${QUOTABAR_VERSION:-1.11.5}"
+app_build="${QUOTABAR_BUILD:-20}"
 
 cd "$project_dir"
 zsh scripts/build-icon.sh
