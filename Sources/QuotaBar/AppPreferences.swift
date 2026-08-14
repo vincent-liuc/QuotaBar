@@ -109,6 +109,19 @@ final class PreferencesStore: @unchecked Sendable {
     }
 }
 
+enum InitialDashboardPresentationPolicy {
+    private static let evaluationKey = "didEvaluateInitialDashboard.v1"
+
+    static func shouldPresent(
+        needsConfiguration: Bool,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        guard !defaults.bool(forKey: evaluationKey) else { return false }
+        defaults.set(true, forKey: evaluationKey)
+        return needsConfiguration
+    }
+}
+
 enum AppDataMigration {
     static let legacyBundleID = "dev.ruobin.OpenAIUsageBar"
     private static let migrationKey = "didMigrateFromOpenAIUsageBar.v1"

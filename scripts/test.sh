@@ -4,6 +4,8 @@ set -euo pipefail
 project_dir="${0:A:h:h}"
 test_binary="/tmp/dev.ruobin.QuotaBar-self-test"
 
+zsh -n "$project_dir/scripts/update-helper.sh"
+
 if /usr/bin/grep -REn \
   'import Security|SecItemCopyMatching|SecItemUpdate|SecItemDelete|KeychainStore' \
   "$project_dir/Sources"; then
@@ -21,6 +23,8 @@ swiftc \
   "$project_dir/Sources/QuotaBar/AutomaticUpdateCoordinator.swift" \
   "$project_dir/Sources/QuotaBar/WeeklyResetMonitor.swift" \
   "$project_dir/Sources/QuotaBar/CredentialStore.swift" \
+  "$project_dir/Sources/QuotaBar/LaunchAtLoginManager.swift" \
+  "$project_dir/Sources/QuotaBar/UsageStore.swift" \
   "$project_dir/Sources/QuotaBar/StatusRingRenderer.swift" \
   "$project_dir/Tests/SelfTest.swift" \
   -o "$test_binary"

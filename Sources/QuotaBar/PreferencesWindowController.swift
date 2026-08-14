@@ -7,7 +7,12 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate {
     init(store: UsageStore) {
         preferencesController = PreferencesViewController(store: store)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 540, height: 450),
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: 540,
+                height: PreferencesViewController.contentHeight(for: .general)
+            ),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -23,13 +28,19 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func present() {
+    func present(tab: SettingsTab = .general) {
         preferencesController.reloadFromStore()
+        preferencesController.selectTab(tab)
         showWindow(nil)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func refreshSubscriptionsFromStore() {
+        guard window?.isVisible == true else { return }
+        preferencesController.refreshSubscriptionsFromStore()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -45,6 +56,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private var editingProfile: StationProfile
     private var profiles: [StationProfile]
     private var subscriptions: [SubscriptionOption] = []
+    private var subscriptionsAreLoaded = false
 
     private let profilePopup = NSPopUpButton()
     private let addProfileButton = NSButton()
@@ -78,7 +90,14 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private var tabViews: [NSView] = []
     private var selectedTab = 0
     private var isLoadingControls = false
+    private var rootHeightConstraint: NSLayoutConstraint?
     private var statusBarHeightConstraint: NSLayoutConstraint?
+    private var stationSaveTask: Task<Void, Never>?
+    private var credentialSaveTask: Task<Void, Never>?
+    private var connectionTestTask: Task<Void, Never>?
+    private var loginTestTask: Task<Void, Never>?
+    private var connectionTestID: UUID?
+    private var loginTestID: UUID?
 
     init(store: UsageStore) {
         self.store = store
@@ -89,10 +108,28 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    deinit {
+        stationSaveTask?.cancel()
+        credentialSaveTask?.cancel()
+        connectionTestTask?.cancel()
+        loginTestTask?.cancel()
+    }
+
     func reloadFromStore() {
         guard isViewLoaded else { return }
         profiles = store.profiles
         loadProfile(store.activeProfile ?? editingProfile)
+    }
+
+    func selectTab(_ tab: SettingsTab) {
+        selectedTab = tab.rawValue
+        if isViewLoaded { updateSelectedTab() }
+    }
+
+    func refreshSubscriptionsFromStore() {
+        guard isViewLoaded,
+              let storedProfile = store.profiles.first(where: { $0.id == editingProfile.id }) else { return }
+        reloadSubscriptionsFromStore(for: storedProfile)
     }
 
     override func loadView() {
@@ -107,11 +144,15 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             $0.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview($0)
         }
+        let rootHeight = root.heightAnchor.constraint(
+            equalToConstant: Self.contentHeight(for: SettingsTab(rawValue: selectedTab) ?? .general)
+        )
+        rootHeightConstraint = rootHeight
         let statusBarHeight = statusBar.heightAnchor.constraint(equalToConstant: 0)
         statusBarHeightConstraint = statusBarHeight
         NSLayoutConstraint.activate([
             root.widthAnchor.constraint(equalToConstant: 540),
-            root.heightAnchor.constraint(equalToConstant: 450),
+            rootHeight,
             profileBar.topAnchor.constraint(equalTo: root.topAnchor),
             profileBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             profileBar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
@@ -185,7 +226,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         profilePopup.target = self
         profilePopup.action = #selector(changeProfile)
         testButton.target = self
-        testButton.action = #selector(testConnection)
+        testButton.action = #selector(testStationConnection)
         loginTestButton.target = self
         loginTestButton.action = #selector(testLogin)
         updateButton.target = self
@@ -219,7 +260,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             let button = SettingsTabButton(title: item.0, symbolName: item.1)
             button.tag = index
             button.target = self
-            button.action = #selector(selectTab(_:))
+            button.action = #selector(selectTabButton(_:))
             return button
         }
         let stack = NSStackView(views: tabButtons)
@@ -448,7 +489,11 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     func controlTextDidEndEditing(_ obj: Notification) {
         guard !isLoadingControls, let field = obj.object as? NSTextField else { return }
         synchronizePasswordFields(from: field)
-        persistProfileFromControls()
+        if field === emailField || field === passwordField || field === visiblePasswordField {
+            persistCredentialsFromControls()
+        } else {
+            persistStationFromControls()
+        }
     }
 
     private func profileFromControls() -> StationProfile {
@@ -493,7 +538,13 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         passwordField.stringValue = credentials?.password ?? ""
         visiblePasswordField.stringValue = passwordField.stringValue
         loginStatusLabel.stringValue = "尚未测试"
-        subscriptions = []
+        if let cachedSubscriptions = store.subscriptionOptions(for: profile.id) {
+            subscriptions = cachedSubscriptions
+            subscriptionsAreLoaded = true
+        } else {
+            subscriptions = []
+            subscriptionsAreLoaded = false
+        }
         reloadSubscriptionPopup(selection: profile.subscriptionSelection)
         connectionLabel.stringValue = capabilitySummary(profile)
         deleteProfileButton.isEnabled = profiles.count > 1
@@ -521,8 +572,10 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             if let index = subscriptionPopup.itemArray.firstIndex(where: { ($0.representedObject as? Int) == id }) {
                 subscriptionPopup.selectItem(at: index)
             } else {
-                subscriptionPopup.addItem(withTitle: "订阅 #\(id)（已保存）")
+                let suffix = subscriptionsAreLoaded ? "不可用" : "已保存"
+                subscriptionPopup.addItem(withTitle: "订阅 #\(id)（\(suffix)）")
                 subscriptionPopup.lastItem?.representedObject = id
+                subscriptionPopup.lastItem?.isEnabled = !subscriptionsAreLoaded
                 subscriptionPopup.select(subscriptionPopup.lastItem)
             }
         } else {
@@ -542,6 +595,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     @objc private func addProfile() {
+        cancelPendingProfileOperations()
         let profile = StationProfile(name: "新站点", serviceURL: "", timezone: TimeZone.current.identifier)
         profiles.append(profile)
         loadProfile(profile)
@@ -551,6 +605,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
     @objc private func changeProfile() {
         guard profilePopup.indexOfSelectedItem >= 0 else { return }
+        cancelPendingProfileOperations()
         let profile = profiles[profilePopup.indexOfSelectedItem]
         loadProfile(profile)
         guard store.profiles.contains(where: { $0.id == profile.id }) else { return }
@@ -565,6 +620,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
 
     @objc private func deleteProfile() {
         guard profiles.count > 1 else { return }
+        cancelPendingProfileOperations()
         let profile = editingProfile
         let alert = NSAlert()
         alert.messageText = "删除站点“\(profile.name)”？"
@@ -587,45 +643,98 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         }
     }
 
-    @objc private func testConnection() {
+    @objc private func testStationConnection() {
+        let profile = profileFromControls()
+        let profileID = profile.id
+        let pendingFieldSaves = cancelPendingFieldSaves()
+        cancelPendingTests()
+        let testID = UUID()
+        connectionTestID = testID
         testButton.isEnabled = false
         testButton.title = "检测中…"
-        connectionLabel.stringValue = "正在验证登录和接口能力"
-        Task {
+        connectionLabel.stringValue = "正在验证站点"
+        connectionTestTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if connectionTestID == testID {
+                    connectionTestTask = nil
+                    connectionTestID = nil
+                    testButton.title = "测试连接"
+                    testButton.isEnabled = true
+                }
+            }
+            for task in pendingFieldSaves { await task.value }
+            guard !Task.isCancelled else { return }
             do {
-                let result = try await store.testConnection(profile: profileFromControls(), credentials: enteredCredentials)
-                subscriptions = result.subscriptions
-                reloadSubscriptionPopup(selection: profileFromControls().subscriptionSelection)
-                var checkedProfile = profileFromControls()
-                checkedProfile.capabilities = result.capabilities
-                checkedProfile.lastCheckedAt = result.checkedAt
-                try await store.updateProfile(checkedProfile, credentials: enteredCredentials)
-                editingProfile = store.activeProfile ?? checkedProfile
+                try await store.updateStationProfile(profile)
+                try Task.checkCancellation()
+                guard connectionTestID == testID, editingProfile.id == profileID,
+                      let storedProfile = store.profiles.first(where: { $0.id == profileID }) else { return }
+                editingProfile = storedProfile
                 profiles = store.profiles
                 reloadProfilePopup()
-                connectionLabel.stringValue = capabilitySummary(checkedProfile)
-            } catch { connectionLabel.stringValue = error.localizedDescription }
-            testButton.title = "测试连接"
-            testButton.isEnabled = true
+                reloadSubscriptionsFromStore(for: storedProfile)
+                connectionLabel.stringValue = "站点连接正常"
+            } catch is CancellationError {
+                return
+            } catch {
+                guard connectionTestID == testID, editingProfile.id == profileID else { return }
+                connectionLabel.stringValue = error.localizedDescription
+            }
         }
     }
 
     @objc private func testLogin() {
+        let profile = profileFromControls()
+        let credentials = enteredCredentials
+        let profileID = profile.id
+        let pendingFieldSaves = cancelPendingFieldSaves()
+        cancelPendingTests()
+        let testID = UUID()
+        loginTestID = testID
         loginTestButton.isEnabled = false
         loginTestButton.title = "测试中…"
         loginStatusLabel.textColor = .secondaryLabelColor
         loginStatusLabel.stringValue = "正在验证"
-        Task {
+        loginTestTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if loginTestID == testID {
+                    loginTestTask = nil
+                    loginTestID = nil
+                    loginTestButton.title = "测试登录"
+                    loginTestButton.isEnabled = true
+                }
+            }
+            for task in pendingFieldSaves { await task.value }
+            guard !Task.isCancelled else { return }
             do {
-                try await store.testLogin(profile: profileFromControls(), credentials: enteredCredentials)
-                loginStatusLabel.textColor = .systemGreen
-                loginStatusLabel.stringValue = "登录成功"
+                let result = try await store.testLogin(profile: profile, credentials: credentials)
+                try Task.checkCancellation()
+                guard loginTestID == testID, editingProfile.id == profileID,
+                      let storedProfile = store.profiles.first(where: { $0.id == profileID }) else { return }
+                editingProfile = storedProfile
+                profiles = store.profiles
+                reloadProfilePopup()
+                reloadSubscriptionsFromStore(for: storedProfile)
+                switch result.subscriptions {
+                case .available:
+                    loginStatusLabel.textColor = .systemGreen
+                    loginStatusLabel.stringValue = "登录成功"
+                case .unsupported:
+                    loginStatusLabel.textColor = .systemGreen
+                    loginStatusLabel.stringValue = "登录成功，站点未提供订阅"
+                case .failed:
+                    loginStatusLabel.textColor = .systemOrange
+                    loginStatusLabel.stringValue = "登录成功，订阅加载失败"
+                }
+            } catch is CancellationError {
+                return
             } catch {
+                guard loginTestID == testID, editingProfile.id == profileID else { return }
                 loginStatusLabel.textColor = .systemRed
                 loginStatusLabel.stringValue = error.localizedDescription
             }
-            loginTestButton.title = "测试登录"
-            loginTestButton.isEnabled = true
         }
     }
 
@@ -665,6 +774,102 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         }
     }
 
+    private func persistStationFromControls() {
+        guard !isLoadingControls else { return }
+        cancelPendingTests()
+        clearMessage()
+        let profile = profileFromControls()
+        let profileID = profile.id
+        let shouldMakeActive = !store.profiles.contains { $0.id == profile.id }
+        stationSaveTask?.cancel()
+        stationSaveTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await store.updateStationProfile(profile, makeActive: shouldMakeActive)
+                try Task.checkCancellation()
+                guard editingProfile.id == profileID,
+                      let storedProfile = store.profiles.first(where: { $0.id == profileID }) else { return }
+                editingProfile = storedProfile
+                profiles = store.profiles
+                reloadProfilePopup()
+                reloadSubscriptionsFromStore(for: storedProfile)
+                connectionLabel.stringValue = capabilitySummary(editingProfile)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard editingProfile.id == profileID else { return }
+                showError(error)
+            }
+        }
+    }
+
+    private func persistCredentialsFromControls() {
+        guard !isLoadingControls else { return }
+        cancelPendingTests()
+        clearMessage()
+        let credentials = enteredCredentials
+        let profileID = editingProfile.id
+        credentialSaveTask?.cancel()
+        credentialSaveTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await store.updateCredentials(credentials, for: profileID)
+                try Task.checkCancellation()
+                guard editingProfile.id == profileID else { return }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard editingProfile.id == profileID else { return }
+                showError(error)
+            }
+        }
+    }
+
+    private func cancelPendingFieldSaves() -> [Task<Void, Never>] {
+        let pendingTasks = [stationSaveTask, credentialSaveTask].compactMap { $0 }
+        stationSaveTask?.cancel()
+        stationSaveTask = nil
+        credentialSaveTask?.cancel()
+        credentialSaveTask = nil
+        return pendingTasks
+    }
+
+    private func cancelPendingTests() {
+        connectionTestTask?.cancel()
+        connectionTestTask = nil
+        connectionTestID = nil
+        loginTestTask?.cancel()
+        loginTestTask = nil
+        loginTestID = nil
+        testButton.title = "测试连接"
+        testButton.isEnabled = true
+        loginTestButton.title = "测试登录"
+        loginTestButton.isEnabled = true
+        if connectionLabel.stringValue == "正在验证站点" {
+            connectionLabel.stringValue = capabilitySummary(editingProfile)
+        }
+        if loginStatusLabel.stringValue == "正在验证" {
+            loginStatusLabel.textColor = .secondaryLabelColor
+            loginStatusLabel.stringValue = "尚未测试"
+        }
+    }
+
+    private func cancelPendingProfileOperations() {
+        _ = cancelPendingFieldSaves()
+        cancelPendingTests()
+    }
+
+    private func reloadSubscriptionsFromStore(for profile: StationProfile) {
+        if let cachedSubscriptions = store.subscriptionOptions(for: profile.id) {
+            subscriptions = cachedSubscriptions
+            subscriptionsAreLoaded = true
+        } else {
+            subscriptions = []
+            subscriptionsAreLoaded = false
+        }
+        reloadSubscriptionPopup(selection: profile.subscriptionSelection)
+    }
+
     private func persistPreferences() {
         guard !isLoadingControls else { return }
         do {
@@ -689,22 +894,62 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         messageLabel.stringValue = launchError ?? error.localizedDescription
         messageLabel.isHidden = false
         statusBarHeightConstraint?.constant = 30
-        selectTab(at: error is StationProfileError ? 1 : 2)
+        if let tab = DashboardIssue.classify(error).settingsTab {
+            selectTab(at: tab.rawValue)
+        } else {
+            resizeWindowForSelectedTab(animated: true)
+        }
     }
 
     private func clearMessage() {
         messageLabel.isHidden = true
         statusBarHeightConstraint?.constant = 0
+        resizeWindowForSelectedTab(animated: true)
     }
 
     @objc private func preferenceControlChanged() { persistPreferences() }
-    @objc private func profileSelectionChanged() { persistProfileFromControls() }
-    @objc private func selectTab(_ sender: SettingsTabButton) { selectTab(at: sender.tag) }
+    @objc private func profileSelectionChanged() { persistStationFromControls() }
+    @objc private func selectTabButton(_ sender: SettingsTabButton) { selectTab(at: sender.tag) }
     private func selectTab(at index: Int) { selectedTab = index; updateSelectedTab() }
 
     private func updateSelectedTab() {
         for (index, button) in tabButtons.enumerated() { button.isSelectedTab = index == selectedTab }
         for (index, tab) in tabViews.enumerated() { tab.isHidden = index != selectedTab }
+        if isViewLoaded { resizeWindowForSelectedTab(animated: view.window?.isVisible == true) }
+    }
+
+    static func contentHeight(for tab: SettingsTab) -> CGFloat {
+        switch tab {
+        case .general: return 270
+        case .station: return 420
+        case .account: return 310
+        case .display: return 280
+        case .update: return 310
+        }
+    }
+
+    private func resizeWindowForSelectedTab(animated: Bool) {
+        guard let tab = SettingsTab(rawValue: selectedTab) else { return }
+        let messageHeight = messageLabel.isHidden ? 0.0 : 30.0
+        let targetContentHeight = Self.contentHeight(for: tab) + messageHeight
+        rootHeightConstraint?.constant = targetContentHeight
+        guard let window = view.window else { return }
+
+        let currentContentRect = window.contentRect(forFrameRect: window.frame)
+        guard abs(currentContentRect.height - targetContentHeight) > 0.5 else { return }
+        let targetFrameSize = window.frameRect(
+            forContentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: currentContentRect.width,
+                height: targetContentHeight
+            )
+        ).size
+        let topEdge = window.frame.maxY
+        var targetFrame = window.frame
+        targetFrame.origin.y = topEdge - targetFrameSize.height
+        targetFrame.size.height = targetFrameSize.height
+        window.setFrame(targetFrame, display: true, animate: animated)
     }
 
     @objc private func checkForUpdates() {

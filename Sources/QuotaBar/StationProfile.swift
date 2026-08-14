@@ -50,10 +50,13 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
     var automaticallyResetsAPIKeyQuota: Bool
     var capabilities: Set<StationCapability>
     var lastCheckedAt: Date?
+    var lastAuthenticatedAt: Date?
+    var validationStateVersion: Int
 
     private enum CodingKeys: String, CodingKey {
         case id, name, serviceURL, apiPath, timezone, subscriptionSelection
-        case automaticallyResetsAPIKeyQuota, capabilities, lastCheckedAt
+        case automaticallyResetsAPIKeyQuota, capabilities, lastCheckedAt, lastAuthenticatedAt
+        case validationStateVersion
     }
 
     init(
@@ -65,7 +68,9 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
         subscriptionSelection: SubscriptionSelection = .automatic,
         automaticallyResetsAPIKeyQuota: Bool = false,
         capabilities: Set<StationCapability> = [],
-        lastCheckedAt: Date? = nil
+        lastCheckedAt: Date? = nil,
+        lastAuthenticatedAt: Date? = nil,
+        validationStateVersion: Int = 1
     ) {
         self.id = id
         self.name = name
@@ -76,6 +81,8 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
         self.automaticallyResetsAPIKeyQuota = automaticallyResetsAPIKeyQuota
         self.capabilities = capabilities
         self.lastCheckedAt = lastCheckedAt
+        self.lastAuthenticatedAt = lastAuthenticatedAt
+        self.validationStateVersion = validationStateVersion
     }
 
     init(from decoder: Decoder) throws {
@@ -92,6 +99,8 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
         ) ?? false
         capabilities = try container.decodeIfPresent(Set<StationCapability>.self, forKey: .capabilities) ?? []
         lastCheckedAt = try container.decodeIfPresent(Date.self, forKey: .lastCheckedAt)
+        lastAuthenticatedAt = try container.decodeIfPresent(Date.self, forKey: .lastAuthenticatedAt)
+        validationStateVersion = try container.decodeIfPresent(Int.self, forKey: .validationStateVersion) ?? 0
     }
 
     static func legacyDefault() -> StationProfile {
@@ -231,4 +240,14 @@ struct ConnectionTestResult: Equatable, Sendable {
     let capabilities: Set<StationCapability>
     let subscriptions: [SubscriptionOption]
     let checkedAt: Date
+}
+
+enum SubscriptionDiscoveryResult: Equatable, Sendable {
+    case available([SubscriptionOption])
+    case unsupported
+    case failed(String)
+}
+
+struct AccountDiscoveryResult: Equatable, Sendable {
+    let subscriptions: SubscriptionDiscoveryResult
 }

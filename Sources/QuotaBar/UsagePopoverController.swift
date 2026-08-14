@@ -3,14 +3,14 @@ import AppKit
 @MainActor
 final class UsagePopoverController: NSViewController {
     private let store: UsageStore
-    private let showPreferences: () -> Void
+    private let showPreferences: (SettingsTab) -> Void
     private let bodyContainer = NSView()
     private let refreshButton = NSButton()
     private let settingsButton = NSButton()
     private let headerUpdatedLabel = NSTextField(labelWithString: "")
     private var bodyView: NSView?
 
-    init(store: UsageStore, showPreferences: @escaping () -> Void) {
+    init(store: UsageStore, showPreferences: @escaping (SettingsTab) -> Void) {
         self.store = store
         self.showPreferences = showPreferences
         super.init(nibName: nil, bundle: nil)
@@ -56,7 +56,7 @@ final class UsagePopoverController: NSViewController {
         guard isViewLoaded else { return }
         bodyView?.removeFromSuperview()
 
-        let nextBody = UsageContentView(store: store)
+        let nextBody = UsageContentView(store: store, showPreferences: showPreferences)
         nextBody.translatesAutoresizingMaskIntoConstraints = false
         bodyContainer.addSubview(nextBody)
         NSLayoutConstraint.activate([
@@ -115,7 +115,7 @@ final class UsagePopoverController: NSViewController {
     }
 
     @objc private func openPreferences() {
-        showPreferences()
+        showPreferences(.general)
     }
 
     @objc private func showApplicationMenu() {
@@ -139,7 +139,10 @@ final class UsagePopoverController: NSViewController {
 
 @MainActor
 private final class UsageContentView: NSView {
-    init(store: UsageStore) {
+    private let showPreferences: (SettingsTab) -> Void
+
+    init(store: UsageStore, showPreferences: @escaping (SettingsTab) -> Void) {
+        self.showPreferences = showPreferences
         super.init(frame: .zero)
 
         let content = NSStackView()
@@ -157,7 +160,9 @@ private final class UsageContentView: NSView {
             content.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
-        if let snapshot = store.snapshot {
+        if store.phase == .needsConfiguration {
+            content.addArrangedSubview(panel(makeConfigurationGuide(store.configurationProgress)))
+        } else if let snapshot = store.snapshot {
             content.addArrangedSubview(makeDashboardPanel(
                 snapshot,
                 preferences: store.preferences,
@@ -167,8 +172,8 @@ private final class UsageContentView: NSView {
             content.addArrangedSubview(makeLoadingView())
         }
 
-        if case .failed(let message) = store.phase {
-            content.addArrangedSubview(panel(makeErrorView(message)))
+        if case .failed(let issue) = store.phase {
+            content.addArrangedSubview(panel(makeErrorView(issue)))
         }
     }
 
@@ -590,22 +595,127 @@ private final class UsageContentView: NSView {
         return stack
     }
 
-    private func makeErrorView(_ message: String) -> NSView {
+    private func makeConfigurationGuide(_ progress: ConfigurationProgress) -> NSView {
+        let title = label("仅需2步开始使用", size: 13, weight: .semibold)
+        let subtitle = label("完成配置后即可查看 Dashboard", size: 10, color: .secondaryLabelColor)
+        let heading = NSStackView(views: [title, subtitle])
+        heading.orientation = .vertical
+        heading.alignment = .leading
+        heading.spacing = 3
+
+        let steps = NSStackView(views: [
+            configurationStep(
+                number: 1,
+                title: "完成站点配置",
+                detail: "填写并验证 Sub2API 兼容站点",
+                isComplete: progress.stationIsValid,
+                tab: .station
+            ),
+            configurationStep(
+                number: 2,
+                title: "填写账户信息",
+                detail: "填写登录账号和登录密码",
+                isComplete: progress.accountIsValid,
+                tab: .account
+            )
+        ])
+        steps.orientation = .vertical
+        steps.alignment = .leading
+        steps.spacing = 6
+
+        let stack = NSStackView(views: [heading, steps])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        return stack
+    }
+
+    private func configurationStep(
+        number: Int,
+        title: String,
+        detail: String,
+        isComplete: Bool,
+        tab: SettingsTab
+    ) -> NSView {
+        let status = NSImageView(image: symbol(isComplete ? "checkmark.circle.fill" : "\(number).circle.fill", pointSize: 17))
+        status.contentTintColor = isComplete ? .systemGreen : .controlAccentColor
+        status.translatesAutoresizingMaskIntoConstraints = false
+        status.widthAnchor.constraint(equalToConstant: 20).isActive = true
+
+        let titleLabel = label(title, size: 12, weight: .medium)
+        let detailLabel = label(isComplete ? "已完成" : detail, size: 10, color: isComplete ? .systemGreen : .secondaryLabelColor)
+        let labels = NSStackView(views: [titleLabel, detailLabel])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 2
+        let arrow = NSImageView(image: symbol("chevron.right", pointSize: 10))
+        arrow.contentTintColor = .tertiaryLabelColor
+        let row = NSStackView(views: [status, labels, NSView(), arrow])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 9
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        row.wantsLayer = true
+        row.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.36).cgColor
+        row.layer?.cornerRadius = 7
+        row.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        let button = DashboardActionButton(contentView: row) { [weak self] in self?.showPreferences(tab) }
+        button.setAccessibilityLabel("\(title)，\(isComplete ? "已完成" : "未完成")，打开设置")
+        return button
+    }
+
+    private func makeErrorView(_ issue: DashboardIssue) -> NSView {
         let icon = NSImageView(image: symbol("exclamationmark.triangle.fill", pointSize: 12))
         icon.contentTintColor = .systemOrange
-        let text = wrappingLabel(message, size: 11, color: .labelColor)
-        let stack = NSStackView(views: [icon, text])
+        let text = wrappingLabel(issue.message, size: 11, color: .labelColor)
+        var views: [NSView] = [icon, text, NSView()]
+        if issue.settingsTab != nil {
+            let arrow = NSImageView(image: symbol("chevron.right", pointSize: 10))
+            arrow.contentTintColor = .secondaryLabelColor
+            views.append(arrow)
+        }
+        let stack = NSStackView(views: views)
         stack.orientation = .horizontal
-        stack.alignment = .top
+        stack.alignment = .centerY
         stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 9, left: 10, bottom: 9, right: 10)
         stack.wantsLayer = true
         stack.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.10).cgColor
         stack.layer?.cornerRadius = 6
         stack.widthAnchor.constraint(equalToConstant: 286).isActive = true
-        return stack
+        guard let tab = issue.settingsTab else { return stack }
+        let button = DashboardActionButton(contentView: stack) { [weak self] in self?.showPreferences(tab) }
+        button.setAccessibilityLabel("\(issue.message)，打开设置")
+        return button
     }
 
+}
+
+@MainActor
+private final class DashboardActionButton: NSButton {
+    private let handler: () -> Void
+
+    init(contentView: NSView, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(frame: .zero)
+        title = ""
+        isBordered = false
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(contentView)
+        NSLayoutConstraint.activate([
+            contentView.topAnchor.constraint(equalTo: topAnchor),
+            contentView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            contentView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+        target = self
+        action = #selector(activate)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func activate() { handler() }
 }
 
 private final class PopoverPanelView: NSView {

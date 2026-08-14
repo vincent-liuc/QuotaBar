@@ -1,7 +1,12 @@
 import Foundation
 import ServiceManagement
 
-final class LaunchAtLoginManager {
+protocol LaunchAtLoginManaging {
+    var statusDescription: String { get }
+    func setEnabled(_ enabled: Bool, refreshRegistration: Bool) throws
+}
+
+final class LaunchAtLoginManager: LaunchAtLoginManaging {
     var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled
     }
@@ -27,7 +32,7 @@ final class LaunchAtLoginManager {
             if refreshRegistration && service.status == .enabled {
                 try service.unregister()
             }
-            guard service.status != .enabled else { return }
+            guard service.status != .enabled && service.status != .requiresApproval else { return }
             try service.register()
         } else {
             guard service.status == .enabled || service.status == .requiresApproval else { return }

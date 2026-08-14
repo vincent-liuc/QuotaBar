@@ -6,6 +6,12 @@ enum APIClientError: LocalizedError, Equatable {
     case api(code: Int, message: String)
     case missingSubscription
     case incompatibleStation
+    case authenticationFailed
+    case twoFactorAuthenticationRequired
+    case interactiveAuthenticationRequired
+    case backendModeRestricted
+    case loginRejected(Int)
+    case stationProbeRejected(Int)
 
     var errorDescription: String? {
         switch self {
@@ -14,6 +20,12 @@ enum APIClientError: LocalizedError, Equatable {
         case .api(_, let message): return message
         case .missingSubscription: return "没有找到可用的订阅周额度"
         case .incompatibleStation: return "该地址不是可识别的 Sub2API 兼容站点"
+        case .authenticationFailed: return "登录信息有误，请调整后再试"
+        case .twoFactorAuthenticationRequired: return "当前账户启用了两步验证，QuotaBar 暂不支持此登录方式"
+        case .interactiveAuthenticationRequired: return "当前站点启用了人机验证，QuotaBar 暂不支持此登录方式"
+        case .backendModeRestricted: return "当前站点仅允许管理员登录，请更换管理员账户后再试"
+        case .loginRejected(let status): return "登录请求被站点拒绝（HTTP \(status)），请检查账户格式或站点认证策略"
+        case .stationProbeRejected(let status): return "站点公共接口拒绝访问（HTTP \(status)），请检查地址、反向代理或访问策略"
         }
     }
 }
@@ -21,9 +33,21 @@ enum APIClientError: LocalizedError, Equatable {
 protocol UsageFetching: Sendable {
     func fetchUsage(profile: StationProfile, credentials: Credentials) async throws -> UsageData
     func resetAPIKeyQuota(profile: StationProfile, credentials: Credentials, keyID: Int) async throws
+    func testStation(profile: StationProfile) async throws
     func testLogin(profile: StationProfile, credentials: Credentials) async throws
+    func discoverAccount(profile: StationProfile, credentials: Credentials) async throws -> AccountDiscoveryResult
     func testConnection(profile: StationProfile, credentials: Credentials) async throws -> ConnectionTestResult
     func invalidateSession() async
+}
+
+extension UsageFetching {
+    func discoverAccount(
+        profile: StationProfile,
+        credentials: Credentials
+    ) async throws -> AccountDiscoveryResult {
+        try await testLogin(profile: profile, credentials: credentials)
+        return AccountDiscoveryResult(subscriptions: .unsupported)
+    }
 }
 
 actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
@@ -59,8 +83,10 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         credentials: Credentials,
         keyID: Int
     ) async throws {
+        try Task.checkCancellation()
         let profile = try profile.validated()
         let token = try await validToken(profile: profile, credentials: credentials)
+        try Task.checkCancellation()
         do {
             try await resetAPIKeyQuota(profile: profile, token: token, keyID: keyID)
         } catch APIClientError.httpStatus(401), APIClientError.httpStatus(403) {
@@ -72,7 +98,7 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
 
     func testConnection(profile: StationProfile, credentials: Credentials) async throws -> ConnectionTestResult {
         let profile = try profile.validated()
-        let token = try await login(profile: profile, credentials: credentials).accessToken
+        let token = try await authenticate(profile: profile, credentials: credentials).accessToken
         let keys = try await fetchAllKeys(profile: profile, token: token)
         var capabilities: Set<StationCapability> = []
         if keys.contains(where: { $0.currentConcurrency != nil }) { capabilities.insert(.concurrency) }
@@ -102,21 +128,48 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
 
         return ConnectionTestResult(
             capabilities: capabilities,
-            subscriptions: subscriptions.compactMap {
-                guard let id = $0.id else { return nil }
-                return SubscriptionOption(
-                    id: id,
-                    name: $0.name ?? "订阅 #\(id)",
-                    status: $0.status,
-                    hasWeeklyLimit: $0.weeklyLimitUSD != nil
-                )
-            },
+            subscriptions: subscriptionOptions(from: subscriptions),
             checkedAt: Date()
         )
     }
 
+    func testStation(profile: StationProfile) async throws {
+        let profile = try profile.validated()
+        let request = URLRequest(url: try endpoint(profile, "settings/public"))
+        do {
+            let envelope: APIEnvelope<PublicSettingsData> = try await send(request)
+            guard envelope.data.hasSub2APIFingerprint else {
+                throw APIClientError.incompatibleStation
+            }
+        } catch APIClientError.httpStatus(let status)
+            where [400, 401, 403, 404, 405, 410, 422].contains(status) {
+            if [404, 405, 410].contains(status) {
+                throw APIClientError.incompatibleStation
+            }
+            throw APIClientError.stationProbeRejected(status)
+        }
+    }
+
     func testLogin(profile: StationProfile, credentials: Credentials) async throws {
-        _ = try await login(profile: profile.validated(), credentials: credentials)
+        _ = try await authenticate(profile: profile.validated(), credentials: credentials)
+    }
+
+    func discoverAccount(
+        profile: StationProfile,
+        credentials: Credentials
+    ) async throws -> AccountDiscoveryResult {
+        let profile = try profile.validated()
+        let token = try await authenticate(profile: profile, credentials: credentials).accessToken
+        do {
+            let records = try await fetchSubscriptions(profile: profile, token: token)
+            return AccountDiscoveryResult(subscriptions: .available(subscriptionOptions(from: records)))
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch APIClientError.httpStatus(let status) where [404, 405, 410].contains(status) {
+            return AccountDiscoveryResult(subscriptions: .unsupported)
+        } catch {
+            return AccountDiscoveryResult(subscriptions: .failed(error.localizedDescription))
+        }
     }
 
     func invalidateSession() {
@@ -155,6 +208,7 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
             accountMetrics: metricsResult,
             keys: keysWithUsage,
             usageRecords: historyResult,
+            subscriptionOptions: subscriptionResult.map { subscriptionOptions(from: $0) },
             capabilities: capabilities
         )
     }
@@ -195,11 +249,18 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         let hasTimeRemaining = tokenExpiresAt.map { $0 > Date().addingTimeInterval(30) } ?? true
         if let cachedToken, tokenIdentity == identity, hasTimeRemaining { return cachedToken }
 
+        return try await authenticate(profile: profile, credentials: credentials).accessToken
+    }
+
+    private func authenticate(
+        profile: StationProfile,
+        credentials: Credentials
+    ) async throws -> AuthenticatedLogin {
         let loginData = try await login(profile: profile, credentials: credentials)
         cachedToken = loginData.accessToken
-        tokenIdentity = identity
+        tokenIdentity = TokenIdentity(profile: profile, credentials: credentials)
         tokenExpiresAt = loginData.expiresIn.map { Date().addingTimeInterval(TimeInterval($0)) }
-        return loginData.accessToken
+        return loginData
     }
 
     private func invalidateToken() {
@@ -208,13 +269,73 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         tokenIdentity = nil
     }
 
-    private func login(profile: StationProfile, credentials: Credentials) async throws -> LoginData {
+    private func login(profile: StationProfile, credentials: Credentials) async throws -> AuthenticatedLogin {
         var request = URLRequest(url: try endpoint(profile, "auth/login"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(LoginPayload(email: credentials.email, password: credentials.password))
-        let envelope: APIEnvelope<LoginData> = try await send(request)
-        return envelope.data
+        try Task.checkCancellation()
+        let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
+        guard let response = response as? HTTPURLResponse else {
+            throw APIClientError.invalidResponse
+        }
+        let envelope = try? JSONDecoder().decode(LoginResponseEnvelope.self, from: data)
+        guard (200...299).contains(response.statusCode) else {
+            throw classifyLoginFailure(status: response.statusCode, envelope: envelope)
+        }
+        guard let envelope else { throw APIClientError.invalidResponse }
+        guard envelope.code == 0 else {
+            throw classifyLoginFailure(status: envelope.code, envelope: envelope)
+        }
+        guard let loginData = envelope.data else { throw APIClientError.invalidResponse }
+        if loginData.requires2FA == true {
+            throw APIClientError.twoFactorAuthenticationRequired
+        }
+        guard let token = loginData.accessToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else {
+            throw APIClientError.invalidResponse
+        }
+        return AuthenticatedLogin(
+            accessToken: token,
+            expiresIn: loginData.expiresIn,
+            tokenType: loginData.tokenType
+        )
+    }
+
+    private func classifyLoginFailure(
+        status: Int,
+        envelope: LoginResponseEnvelope?
+    ) -> APIClientError {
+        let reason = envelope?.reason?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let message = envelope?.message.lowercased() ?? ""
+        if reason.contains("CAPTCHA") || reason.contains("TURNSTILE") {
+            return .interactiveAuthenticationRequired
+        }
+        if reason == "BACKEND_MODE_ADMIN_ONLY" {
+            return .backendModeRestricted
+        }
+        if ["INVALID_CREDENTIALS", "USER_NOT_ACTIVE"].contains(reason)
+            || message.contains("invalid credential")
+            || message.contains("invalid email or password")
+            || message.contains("user is not active") {
+            return .authenticationFailed
+        }
+        if status == 401 { return .authenticationFailed }
+        if [400, 403, 422].contains(status) { return .loginRejected(status) }
+        return .httpStatus(status)
+    }
+
+    private func subscriptionOptions(from records: [SubscriptionRecord]) -> [SubscriptionOption] {
+        records.compactMap {
+            guard let id = $0.id else { return nil }
+            return SubscriptionOption(
+                id: id,
+                name: $0.name ?? "订阅 #\(id)",
+                status: $0.status,
+                hasWeeklyLimit: $0.weeklyLimitUSD != nil
+            )
+        }
     }
 
     private func fetchAllKeys(profile: StationProfile, token: String) async throws -> [UsageKey] {
@@ -284,11 +405,13 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
     }
 
     private func resetAPIKeyQuota(profile: StationProfile, token: String, keyID: Int) async throws {
+        try Task.checkCancellation()
         var request = URLRequest(url: try endpoint(profile, "keys/\(keyID)"))
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(ResetAPIKeyQuotaPayload())
+        try Task.checkCancellation()
         let _: APIEnvelope<IgnoredAPIData> = try await send(request)
     }
 
@@ -326,6 +449,7 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
     }
 
     private func send<Value: Decodable>(_ request: URLRequest) async throws -> APIEnvelope<Value> {
+        try Task.checkCancellation()
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw APIClientError.invalidResponse }
         guard (200...299).contains(response.statusCode) else { throw APIClientError.httpStatus(response.statusCode) }
@@ -351,6 +475,19 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         guard task.currentRequest?.url?.origin == request.url?.origin else { return nil }
         return request
     }
+}
+
+private struct AuthenticatedLogin: Sendable {
+    let accessToken: String
+    let expiresIn: Int?
+    let tokenType: String?
+}
+
+private struct LoginResponseEnvelope: Decodable, Sendable {
+    let code: Int
+    let message: String
+    let reason: String?
+    let data: LoginData?
 }
 
 enum WeeklyResetCalculator {

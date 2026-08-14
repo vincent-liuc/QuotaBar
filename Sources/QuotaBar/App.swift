@@ -8,17 +8,26 @@ enum QuotaBarApp {
         let delegate = AppController()
         application.delegate = delegate
         application.setActivationPolicy(.accessory)
-        application.mainMenu = makeMainMenu()
+        application.mainMenu = makeMainMenu(target: delegate)
         application.run()
         _ = delegate
     }
 
     @MainActor
-    private static func makeMainMenu() -> NSMenu {
+    private static func makeMainMenu(target: AppController) -> NSMenu {
         let mainMenu = NSMenu()
 
         let applicationMenuItem = NSMenuItem()
         let applicationMenu = NSMenu(title: "QuotaBar")
+        let showDashboardItem = NSMenuItem(
+            title: "显示 Dashboard",
+            action: #selector(AppController.showDashboard(_:)),
+            keyEquivalent: "d"
+        )
+        showDashboardItem.keyEquivalentModifierMask = [.command, .shift]
+        showDashboardItem.target = target
+        applicationMenu.addItem(showDashboardItem)
+        applicationMenu.addItem(.separator())
         applicationMenu.addItem(
             withTitle: "退出 QuotaBar",
             action: #selector(NSApplication.terminate(_:)),
@@ -58,21 +67,25 @@ final class AppController: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDataMigration.migrateLegacyDefaultsIfNeeded()
         store = UsageStore()
-        contentController = UsagePopoverController(store: store) { [weak self] in
-            self?.showPreferences()
+        contentController = UsagePopoverController(store: store) { [weak self] tab in
+            self?.showPreferences(tab: tab)
         }
 
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = contentController
 
+        statusItem.autosaveName = "QuotaBar.StatusItem"
         guard let button = statusItem.button else { return }
         button.target = self
         button.action = #selector(togglePopover)
         button.toolTip = "QuotaBar"
+        button.setAccessibilityIdentifier("QuotaBar.StatusItem")
+        button.setAccessibilityHelp("打开 Dashboard")
 
         store.onChange = { [weak self] in
             self?.refreshUI()
+            self?.preferencesController?.refreshSubscriptionsFromStore()
         }
         refreshUI()
         automaticUpdateCoordinator = AutomaticUpdateCoordinator()
@@ -88,21 +101,20 @@ final class AppController: NSObject, NSApplicationDelegate {
             }
         }
         RunLoop.main.add(statusAnimationTimer!, forMode: .common)
-
-        if store.needsConfiguration {
-            DispatchQueue.main.async { [weak self] in
-                self?.showPreferences()
-            }
+        if InitialDashboardPresentationPolicy.shouldPresent(
+            needsConfiguration: store.needsConfiguration
+        ) {
+            DispatchQueue.main.async { [weak self] in self?.showPopover() }
         }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if store.needsConfiguration {
-            showPreferences()
-        } else {
-            showPopover()
-        }
+        showPopover()
         return true
+    }
+
+    @objc func showDashboard(_ sender: Any?) {
+        showPopover()
     }
 
     @objc private func togglePopover() {
@@ -140,11 +152,11 @@ final class AppController: NSObject, NSApplicationDelegate {
         button.needsDisplay = true
     }
 
-    private func showPreferences() {
+    private func showPreferences(tab: SettingsTab = .general) {
         popover.performClose(nil)
         let controller = PreferencesWindowController(store: store)
         preferencesController = controller
-        controller.present()
+        controller.present(tab: tab)
     }
 
     private var accessibilityLabel: String {

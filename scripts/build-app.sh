@@ -10,8 +10,8 @@ contents_dir="$bundle_dir/Contents"
 output_zip="$project_dir/outputs/QuotaBar-macOS.zip"
 source_zip="$project_dir/outputs/QuotaBar-source.zip"
 architectures=(--arch arm64 --arch x86_64)
-app_version="${QUOTABAR_VERSION:-1.11.6}"
-app_build="${QUOTABAR_BUILD:-21}"
+app_version="${QUOTABAR_VERSION:-1.11.7}"
+app_build="${QUOTABAR_BUILD:-22}"
 
 cd "$project_dir"
 zsh scripts/build-icon.sh
@@ -23,6 +23,8 @@ rm -f "$output_zip" "$source_zip"
 mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$binary_path" "$contents_dir/MacOS/QuotaBar"
 cp "$project_dir/Assets/AppIcon.icns" "$contents_dir/Resources/AppIcon.icns"
+cp "$project_dir/scripts/update-helper.sh" "$contents_dir/Resources/update-helper.sh"
+chmod 755 "$contents_dir/Resources/update-helper.sh"
 
 cat > "$contents_dir/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -52,6 +54,8 @@ cat > "$contents_dir/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
+    <true/>
+    <key>LSMultipleInstancesProhibited</key>
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>

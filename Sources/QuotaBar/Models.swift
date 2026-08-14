@@ -12,14 +12,34 @@ struct LoginPayload: Encodable, Sendable {
 }
 
 struct LoginData: Decodable, Sendable {
-    let accessToken: String
+    let accessToken: String?
     let expiresIn: Int?
     let tokenType: String?
+    let requires2FA: Bool?
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case expiresIn = "expires_in"
         case tokenType = "token_type"
+        case requires2FA = "requires_2fa"
+    }
+}
+
+struct PublicSettingsData: Decodable, Sendable {
+    let version: String?
+    let siteName: String?
+    let serverTimezone: String?
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case siteName = "site_name"
+        case serverTimezone = "server_timezone"
+    }
+
+    var hasSub2APIFingerprint: Bool {
+        [version, siteName, serverTimezone].contains { value in
+            !(value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        }
     }
 }
 
@@ -176,7 +196,24 @@ struct UsageData: Equatable, Sendable {
     let accountMetrics: AccountMetrics?
     let keys: [UsageKey]
     let usageRecords: [UsageRecord]?
+    let subscriptionOptions: [SubscriptionOption]?
     let capabilities: Set<StationCapability>
+
+    init(
+        weeklyUsage: WeeklyUsage?,
+        accountMetrics: AccountMetrics?,
+        keys: [UsageKey],
+        usageRecords: [UsageRecord]?,
+        subscriptionOptions: [SubscriptionOption]? = nil,
+        capabilities: Set<StationCapability>
+    ) {
+        self.weeklyUsage = weeklyUsage
+        self.accountMetrics = accountMetrics
+        self.keys = keys
+        self.usageRecords = usageRecords
+        self.subscriptionOptions = subscriptionOptions
+        self.capabilities = capabilities
+    }
 }
 
 struct UsageKey: Decodable, Equatable, Sendable {
@@ -260,9 +297,125 @@ struct Credentials: Equatable, Sendable {
     let password: String
 }
 
+enum SettingsTab: Int, CaseIterable, Sendable {
+    case general
+    case station
+    case account
+    case display
+    case update
+}
+
+struct ConfigurationProgress: Equatable, Sendable {
+    let stationIsValid: Bool
+    let accountIsValid: Bool
+
+    var isComplete: Bool { stationIsValid && accountIsValid }
+}
+
+struct DashboardIssue: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case authentication
+        case station
+        case temporary
+        case unknown
+    }
+
+    let kind: Kind
+    let message: String
+
+    var settingsTab: SettingsTab? {
+        switch kind {
+        case .authentication: return .account
+        case .station: return .station
+        case .temporary, .unknown: return nil
+        }
+    }
+
+    static func classify(_ error: Error) -> DashboardIssue {
+        if let stationError = error as? StationProfileError {
+            if stationError == .missingCredentials { return authenticationIssue }
+            return DashboardIssue(kind: .station, message: stationError.localizedDescription)
+        }
+        if let apiError = error as? APIClientError {
+            switch apiError {
+            case .httpStatus(401), .httpStatus(403), .authenticationFailed:
+                return authenticationIssue
+            case .twoFactorAuthenticationRequired:
+                return DashboardIssue(kind: .authentication, message: apiError.localizedDescription)
+            case .backendModeRestricted, .loginRejected:
+                return DashboardIssue(kind: .authentication, message: apiError.localizedDescription)
+            case .interactiveAuthenticationRequired, .stationProbeRejected:
+                return stationIssue(apiError.localizedDescription)
+            case .httpStatus(404), .httpStatus(405), .httpStatus(410),
+                 .invalidResponse, .incompatibleStation:
+                return stationIssue("站点信息有误或接口不兼容，请检查站点配置")
+            case .httpStatus(408), .httpStatus(429):
+                return temporaryIssue
+            case .httpStatus(let status) where status >= 500:
+                return temporaryIssue
+            case .api(let code, let message):
+                if code == 401 || code == 403 || authenticationMessage(message) {
+                    return authenticationIssue
+                }
+                if code == 404 || code == 405 {
+                    return stationIssue("站点信息有误或接口不兼容，请检查站点配置")
+                }
+                if code == 408 || code == 429 || code >= 500 { return temporaryIssue }
+                return DashboardIssue(kind: .unknown, message: message)
+            case .missingSubscription:
+                return stationIssue(apiError.localizedDescription)
+            case .httpStatus:
+                return DashboardIssue(kind: .unknown, message: apiError.localizedDescription)
+            }
+        }
+
+        if error is DecodingError {
+            return stationIssue("站点信息有误或接口不兼容，请检查站点配置")
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            let code = URLError.Code(rawValue: nsError.code)
+            switch code {
+            case .badURL, .unsupportedURL, .cannotFindHost, .cannotConnectToHost,
+                 .dnsLookupFailed, .secureConnectionFailed, .serverCertificateHasBadDate,
+                 .serverCertificateUntrusted, .serverCertificateHasUnknownRoot,
+                 .serverCertificateNotYetValid, .clientCertificateRejected,
+                 .clientCertificateRequired:
+                return stationIssue("无法连接当前站点，请检查站点地址和网络环境")
+            default:
+                return temporaryIssue
+            }
+        }
+        return DashboardIssue(kind: .unknown, message: error.localizedDescription)
+    }
+
+    private static let authenticationIssue = DashboardIssue(
+        kind: .authentication,
+        message: "登录信息有误，请调整后再试"
+    )
+    private static let temporaryIssue = DashboardIssue(
+        kind: .temporary,
+        message: "服务暂时不可用，请稍后重试"
+    )
+
+    private static func stationIssue(_ message: String) -> DashboardIssue {
+        DashboardIssue(kind: .station, message: message)
+    }
+
+    private static func authenticationMessage(_ message: String) -> Bool {
+        let value = message.lowercased()
+        return value.contains("invalid credential")
+            || value.contains("invalid email or password")
+            || value.contains("user is not active")
+            || value.contains("token expired")
+            || value.contains("token revoked")
+    }
+}
+
 enum UsagePhase: Equatable, Sendable {
     case needsConfiguration
     case loading
     case ready
-    case failed(String)
+    case failed(DashboardIssue)
 }
