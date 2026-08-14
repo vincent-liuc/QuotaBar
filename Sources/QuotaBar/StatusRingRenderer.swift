@@ -23,6 +23,8 @@ enum StatusRingRenderer {
             }
             return true
         }
+        // Keep the progress surface colored while resolving the cat silhouette
+        // from the current menu bar appearance during each redraw.
         image.isTemplate = false
         return image
     }
@@ -42,15 +44,24 @@ enum StatusRingRenderer {
     }
 
     private static func drawCatTemplate(in catRect: NSRect, earFrame: EarFrame) {
-        let template: NSImage
+        let svg: String
         switch earFrame {
-        case .left: template = leftEarCatTemplate
-        case .center: template = catTemplate
-        case .right: template = rightEarCatTemplate
+        case .left: svg = leftEarCatSVG
+        case .center: svg = catSVG
+        case .right: svg = rightEarCatSVG
         }
-        template.draw(
+        let colorHex = labelColorHex
+        let cacheKey = "\(earFrame)-\(colorHex)"
+        let image: NSImage
+        if let cached = coloredCatTemplates[cacheKey] {
+            image = cached
+        } else {
+            image = NSImage(data: Data(svg.replacingOccurrences(of: "#141414", with: colorHex).utf8)) ?? catTemplate
+            coloredCatTemplates[cacheKey] = image
+        }
+        image.draw(
             in: catRect,
-            from: NSRect(origin: .zero, size: catTemplate.size),
+            from: NSRect(origin: .zero, size: image.size),
             operation: .sourceOver,
             fraction: 1,
             respectFlipped: true,
@@ -113,22 +124,18 @@ enum StatusRingRenderer {
         </svg>
         """#
 
-    private static let leftEarCatTemplate = animatedEarTemplate(replacements: [
-        ("M 307 174 L 287 211 L 273 297", "M 235 225 L 255 255 L 273 297"),
-        ("L 462 252 L 393 199 L 334 171 Z", "L 462 252 L 370 225 L 290 210 Z")
-    ])
+    private static let catSVG = animatedEarCatSVG
 
-    private static let rightEarCatTemplate = animatedEarTemplate(replacements: [
-        ("M 307 174 L 287 211 L 273 297", "M 380 205 L 330 235 L 273 297"),
-        ("L 462 252 L 393 199 L 334 171 Z", "L 462 252 L 420 215 L 395 190 Z")
-    ])
+    private static let leftEarCatSVG = animatedEarCatSVG.replacingOccurrences(of: "M 307 174 L 287 211 L 273 297", with: "M 235 225 L 255 255 L 273 297").replacingOccurrences(of: "L 462 252 L 393 199 L 334 171 Z", with: "L 462 252 L 370 225 L 290 210 Z")
 
-    private static func animatedEarTemplate(replacements: [(String, String)]) -> NSImage {
-        let svg = replacements.reduce(animatedEarCatSVG) { result, replacement in
-            result.replacingOccurrences(of: replacement.0, with: replacement.1)
-        }
-        return NSImage(data: Data(svg.utf8)) ?? NSImage()
+    private static let rightEarCatSVG = animatedEarCatSVG.replacingOccurrences(of: "M 307 174 L 287 211 L 273 297", with: "M 380 205 L 330 235 L 273 297").replacingOccurrences(of: "L 462 252 L 393 199 L 334 171 Z", with: "L 462 252 L 420 215 L 395 190 Z")
+
+    private static var labelColorHex: String {
+        let color = NSColor.labelColor.usingColorSpace(.deviceRGB) ?? .black
+        return String(format: "#%02X%02X%02X", Int((color.redComponent * 255).rounded()), Int((color.greenComponent * 255).rounded()), Int((color.blueComponent * 255).rounded()))
     }
+
+    private static var coloredCatTemplates: [String: NSImage] = [:]
 
     private static func drawStateIndicator(for phase: UsagePhase, in rect: NSRect) {
         let color: NSColor

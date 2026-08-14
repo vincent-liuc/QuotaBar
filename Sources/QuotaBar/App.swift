@@ -178,12 +178,16 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func refreshStatusIcon() {
         guard let button = statusItem.button else { return }
-        button.image = StatusRingRenderer.image(
-            progress: store.snapshot.flatMap { $0.hasWeeklyUsage ? $0.progress : nil },
-            phase: store.phase,
-            wavePhase: wavePhase,
-            tailPhase: tailPhase
-        )
+        var renderedImage: NSImage?
+        button.effectiveAppearance.performAsCurrentDrawingAppearance {
+            renderedImage = StatusRingRenderer.image(
+                progress: store.snapshot.flatMap { $0.hasWeeklyUsage ? $0.progress : nil },
+                phase: store.phase,
+                wavePhase: wavePhase,
+                tailPhase: tailPhase
+            )
+        }
+        button.image = renderedImage
         button.needsDisplay = true
     }
 

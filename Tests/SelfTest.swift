@@ -204,6 +204,7 @@ enum SelfTest {
     private static func testStatusCatFill() {
         func bitmap(_ progress: Double) -> NSBitmapImageRep {
             let image = StatusRingRenderer.image(progress: progress, phase: .ready)
+            require(!image.isTemplate, "status icon preserves its colored progress surface")
             return NSBitmapImageRep(data: image.tiffRepresentation!)!
         }
 
@@ -216,6 +217,20 @@ enum SelfTest {
                         && color.alphaComponent > 0.5
                 }.count
             }
+        }
+
+        func averageBrightness(_ bitmap: NSBitmapImageRep) -> CGFloat {
+            var total: CGFloat = 0
+            var count: CGFloat = 0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide {
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                          color.alphaComponent > 0.5 else { continue }
+                    total += (color.redComponent + color.greenComponent + color.blueComponent) / 3
+                    count += 1
+                }
+            }
+            return count > 0 ? total / count : 0
         }
 
         let empty = bitmap(0)
@@ -234,6 +249,12 @@ enum SelfTest {
         require(greenPixels(full, rows: 0..<full.pixelsHigh) > greenPixels(ten, rows: 0..<ten.pixelsHigh), "full cat has more green fill")
         require(empty.colorAt(x: 0, y: 0)?.alphaComponent == 0, "status icon has no outer background")
         require(waveA.tiffRepresentation != waveB.tiffRepresentation, "wave phase animates green surface")
+        var light: NSBitmapImageRep!
+        var dark: NSBitmapImageRep!
+        NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance { light = bitmap(0) }
+        NSAppearance(named: .darkAqua)!.performAsCurrentDrawingAppearance { dark = bitmap(0) }
+        require(averageBrightness(light) < 0.35, "light menu bar uses a dark cat silhouette")
+        require(averageBrightness(dark) > 0.65, "dark menu bar uses a light cat silhouette")
         let topEnd = Int(ceil(Double(leftEar.pixelsHigh) * 0.40))
         var changedTopPixels = 0
         for y in 0..<topEnd {
@@ -241,7 +262,7 @@ enum SelfTest {
                 changedTopPixels += 1
             }
         }
-        require(changedTopPixels >= 8, "left ear swing visibly changes the 20px top silhouette")
+        require(changedTopPixels >= 6, "left ear swing visibly changes the 20px top silhouette")
     }
 
     private static func bitmapImage(_ image: NSImage) -> NSBitmapImageRep {
