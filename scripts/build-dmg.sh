@@ -2,11 +2,9 @@
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
-app_name="OpenAI用量"
-version="1.5.0"
-app_zip="$project_dir/outputs/OpenAI-Usage-macOS.zip"
-output_dmg="$project_dir/outputs/OpenAI用量-$version-universal.dmg"
-staging_dir="$(mktemp -d /tmp/dev.ruobin.OpenAIUsageBar-dmg.XXXXXX)"
+app_name="QuotaBar"
+app_zip="$project_dir/outputs/QuotaBar-macOS.zip"
+staging_dir="$(mktemp -d /tmp/dev.ruobin.QuotaBar-dmg.XXXXXX)"
 mount_point=""
 
 cleanup() {
@@ -21,11 +19,13 @@ cd "$project_dir"
 zsh scripts/build-app.sh
 
 ditto -x -k "$app_zip" "$staging_dir"
+version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$staging_dir/$app_name.app/Contents/Info.plist")"
+output_dmg="$project_dir/outputs/QuotaBar-$version-universal.dmg"
 ln -s /Applications "$staging_dir/Applications"
 cp "$project_dir/Assets/AppIcon.icns" "$staging_dir/.VolumeIcon.icns"
 
 cat > "$staging_dir/安装说明.txt" <<'TEXT'
-安装：将“OpenAI用量.app”拖到旁边的 Applications 文件夹。
+安装：将“QuotaBar.app”拖到旁边的 Applications 文件夹。
 
 系统要求：macOS 14 或更高版本，支持 Apple Silicon 和 Intel Mac。
 
@@ -51,12 +51,18 @@ if [[ -z "$mount_point" ]]; then
 fi
 
 codesign --verify --deep --strict "$mount_point/$app_name.app"
-lipo -verify_arch arm64 "$mount_point/$app_name.app/Contents/MacOS/OpenAIUsageBar"
-lipo -verify_arch x86_64 "$mount_point/$app_name.app/Contents/MacOS/OpenAIUsageBar"
+lipo -verify_arch arm64 "$mount_point/$app_name.app/Contents/MacOS/QuotaBar"
+lipo -verify_arch x86_64 "$mount_point/$app_name.app/Contents/MacOS/QuotaBar"
 test -L "$mount_point/Applications"
 test -f "$mount_point/安装说明.txt"
 
 hdiutil detach "$mount_point" -quiet
 mount_point=""
 
+(
+  cd "$project_dir/outputs"
+  shasum -a 256 "${output_dmg:t}" > "${output_dmg:t}.sha256"
+)
+
 echo "$output_dmg"
+echo "$output_dmg.sha256"
