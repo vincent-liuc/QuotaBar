@@ -246,9 +246,25 @@ enum SelfTest {
         let tenTop = greenPixels(ten, rows: 0..<split)
         let tenBottom = greenPixels(ten, rows: split..<ten.pixelsHigh)
         require(tenBottom > tenTop, "ten percent green fill stays at cat bottom")
-        require(greenPixels(full, rows: 0..<full.pixelsHigh) > greenPixels(ten, rows: 0..<ten.pixelsHigh), "full cat has more green fill")
+        require(greenPixels(full, rows: 0..<full.pixelsHigh) < greenPixels(ten, rows: 0..<ten.pixelsHigh), "high usage cat leaves the green threshold")
         require(empty.colorAt(x: 0, y: 0)?.alphaComponent == 0, "status icon has no outer background")
         require(waveA.tiffRepresentation != waveB.tiffRepresentation, "wave phase animates green surface")
+
+        func rgb(_ color: NSColor) -> (CGFloat, CGFloat, CGFloat) {
+            let resolved = color.usingColorSpace(.deviceRGB) ?? .black
+            return (resolved.redComponent, resolved.greenComponent, resolved.blueComponent)
+        }
+        func colorsMatch(_ lhs: NSColor, _ rhs: NSColor) -> Bool {
+            let left = rgb(lhs)
+            let right = rgb(rhs)
+            return abs(left.0 - right.0) < 0.02
+                && abs(left.1 - right.1) < 0.02
+                && abs(left.2 - right.2) < 0.02
+        }
+        require(colorsMatch(StatusRingRenderer.color(for: 0.69), .systemGreen), "status color stays green below warning threshold")
+        require(colorsMatch(StatusRingRenderer.color(for: 0.70), .systemOrange), "status color turns orange at warning threshold")
+        require(colorsMatch(StatusRingRenderer.color(for: 0.90), .systemRed), "status color turns red at critical threshold")
+
         var light: NSBitmapImageRep!
         var dark: NSBitmapImageRep!
         NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance { light = bitmap(0) }

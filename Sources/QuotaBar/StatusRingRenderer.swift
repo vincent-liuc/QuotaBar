@@ -37,7 +37,7 @@ enum StatusRingRenderer {
             context.saveGState()
             waveClip(progress: bounded, wavePhase: wavePhase, in: catRect).addClip()
             context.setBlendMode(.sourceAtop)
-            NSColor.systemGreen.setFill()
+            color(for: bounded).setFill()
             NSBezierPath(rect: catRect).fill()
             context.restoreGState()
         }
