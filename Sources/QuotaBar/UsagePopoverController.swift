@@ -182,7 +182,7 @@ private final class UsageContentView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    private func makeUsageRow(_ snapshot: UsageSnapshot) -> NSView {
+    private func makeUsageRow(_ snapshot: UsageSnapshot, stationKind: StationKind) -> NSView {
         let ring = LargeUsageRingView(snapshot: snapshot)
         ring.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -190,21 +190,25 @@ private final class UsageContentView: NSView {
             ring.heightAnchor.constraint(equalToConstant: 82)
         ])
         let quotaKind = snapshot.weeklyUsage?.kind ?? .weekly
-        let resetTitle: String
-        switch quotaKind {
-        case .accountPool:
-            resetTitle = "账户额度"
-        case .tokenPool:
-            resetTitle = "限额令牌汇总"
-        case .weekly:
-            resetTitle = weeklyResetTitle(snapshot.weeklyUsage?.resetAt)
+        var ringViews: [NSView] = [ring]
+        if !(stationKind == .newAPI && quotaKind == .accountPool) {
+            let resetTitle: String
+            switch quotaKind {
+            case .accountPool:
+                resetTitle = "账户额度"
+            case .tokenPool:
+                resetTitle = "限额令牌汇总"
+            case .weekly:
+                resetTitle = weeklyResetTitle(snapshot.weeklyUsage?.resetAt)
+            }
+            let reset = label(resetTitle, size: 9, color: .tertiaryLabelColor)
+            reset.alignment = .center
+            reset.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+            reset.toolTip = snapshot.weeklyUsage?.resetAt.map { "下次周额度重置：\(resetDateFormatter.string(from: $0))" }
+            reset.widthAnchor.constraint(equalToConstant: 82).isActive = true
+            ringViews.append(reset)
         }
-        let reset = label(resetTitle, size: 9, color: .tertiaryLabelColor)
-        reset.alignment = .center
-        reset.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
-        reset.toolTip = snapshot.weeklyUsage?.resetAt.map { "下次周额度重置：\(resetDateFormatter.string(from: $0))" }
-        reset.widthAnchor.constraint(equalToConstant: 82).isActive = true
-        let ringGroup = NSStackView(views: [ring, reset])
+        let ringGroup = NSStackView(views: ringViews)
         ringGroup.orientation = .vertical
         ringGroup.alignment = .centerX
         ringGroup.spacing = 1
@@ -261,12 +265,12 @@ private final class UsageContentView: NSView {
         sections.alignment = .leading
         sections.spacing = 0
 
-        if preferences.showMetricCards, let accountMetrics = snapshot.accountMetrics {
+        if stationKind != .newAPI, preferences.showMetricCards, let accountMetrics = snapshot.accountMetrics {
             sections.addArrangedSubview(makeMetricCards(accountMetrics))
             sections.addArrangedSubview(sectionSeparator())
         }
         if snapshot.hasWeeklyUsage {
-            sections.addArrangedSubview(makeUsageRow(snapshot))
+            sections.addArrangedSubview(makeUsageRow(snapshot, stationKind: stationKind))
         } else {
             sections.addArrangedSubview(unavailableRow(
                 stationKind == .newAPI ? "当前站点没有设置限额令牌" : "当前站点没有可用的周订阅额度"

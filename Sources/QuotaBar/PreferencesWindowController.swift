@@ -79,6 +79,10 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let tabContainer = NSView()
     private var tabButtons: [SettingsTabButton] = []
     private var tabViews: [NSView] = []
+    private var stationRows: [NSView] = []
+    private var stationSeparators: [NSView] = []
+    private var displayRows: [NSView] = []
+    private var displaySeparators: [NSView] = []
     private var selectedTab = 0
     private var isLoadingControls = false
     private var statusBarHeightConstraint: NSLayoutConstraint?
@@ -295,18 +299,20 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         connectionControls.orientation = .horizontal
         connectionControls.alignment = .centerY
         connectionControls.spacing = 9
+        stationRows = [
+            fieldRow(title: "站点名称", field: nameField),
+            settingsRow(title: "站点类型", control: stationKindPopup),
+            fieldRow(title: "服务地址", field: serviceURLField),
+            fieldRow(title: "API 路径", field: apiPathField),
+            settingsRow(title: "时区", control: timezonePopup),
+            settingsRow(title: "订阅", control: subscriptionPopup),
+            settingsRow(title: "自动重置用量", control: resetControls),
+            settingsRow(title: "兼容性测试", control: connectionControls)
+        ]
+        let panel = settingsPanel(stationRows, separators: &stationSeparators)
         return tabStack([
             sectionTitle("站点配置"),
-            settingsPanel([
-                fieldRow(title: "站点名称", field: nameField),
-                settingsRow(title: "站点类型", control: stationKindPopup),
-                fieldRow(title: "服务地址", field: serviceURLField),
-                fieldRow(title: "API 路径", field: apiPathField),
-                settingsRow(title: "时区", control: timezonePopup),
-                settingsRow(title: "订阅", control: subscriptionPopup),
-                settingsRow(title: "自动重置用量", control: resetControls),
-                settingsRow(title: "兼容性测试", control: connectionControls)
-            ])
+            panel
         ])
     }
 
@@ -339,14 +345,16 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func makeDisplayTab() -> NSView {
-        tabStack([
+        displayRows = [
+            settingsRow(title: "累计指标", control: showMetricCardsSwitch),
+            settingsRow(title: "每日用量", control: showDailyUsageSwitch),
+            settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch),
+            settingsRow(title: "使用记录", control: showUsageHistorySwitch)
+        ]
+        let panel = settingsPanel(displayRows, separators: &displaySeparators)
+        return tabStack([
             sectionTitle("Dashboard组件设置"),
-            settingsPanel([
-                settingsRow(title: "累计指标", control: showMetricCardsSwitch),
-                settingsRow(title: "每日用量", control: showDailyUsageSwitch),
-                settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch),
-                settingsRow(title: "使用记录", control: showUsageHistorySwitch)
-            ])
+            panel
         ])
     }
 
@@ -381,9 +389,18 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     }
 
     private func settingsPanel(_ rows: [NSView]) -> NSView {
+        var separators: [NSView] = []
+        return settingsPanel(rows, separators: &separators)
+    }
+
+    private func settingsPanel(_ rows: [NSView], separators: inout [NSView]) -> NSView {
         var arranged: [NSView] = []
         for (index, row) in rows.enumerated() {
-            if index > 0 { arranged.append(settingsSeparator()) }
+            if index > 0 {
+                let separator = settingsSeparator()
+                separators.append(separator)
+                arranged.append(separator)
+            }
             arranged.append(row)
         }
         let stack = NSStackView(views: arranged)
@@ -404,6 +421,22 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor)
         ])
         return panel
+    }
+
+    private func updatePanelVisibility(
+        rows: [NSView],
+        separators: [NSView],
+        hiddenIndices: Set<Int>
+    ) {
+        var hasVisibleRow = false
+        for (index, row) in rows.enumerated() {
+            let isVisible = !hiddenIndices.contains(index)
+            row.isHidden = !isVisible
+            if index > 0 {
+                separators[index - 1].isHidden = !(isVisible && hasVisibleRow)
+            }
+            if isVisible { hasVisibleRow = true }
+        }
     }
 
     private func settingsRow(title: String, control: NSView) -> NSView {
@@ -582,6 +615,16 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             subscriptionPopup.selectItem(at: 0)
         }
         apiPathField.placeholderString = editingProfile.kind.defaultAPIPath
+        updatePanelVisibility(
+            rows: stationRows,
+            separators: stationSeparators,
+            hiddenIndices: isSub2API ? [] : [5, 6]
+        )
+        updatePanelVisibility(
+            rows: displayRows,
+            separators: displaySeparators,
+            hiddenIndices: isSub2API ? [] : [0, 1]
+        )
     }
 
     private func capabilitySummary(_ profile: StationProfile) -> String {
