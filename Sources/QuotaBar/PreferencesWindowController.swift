@@ -343,8 +343,8 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             sectionTitle("Dashboard组件设置"),
             settingsPanel([
                 settingsRow(title: "累计指标", control: showMetricCardsSwitch),
-                settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch),
                 settingsRow(title: "每日用量", control: showDailyUsageSwitch),
+                settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch),
                 settingsRow(title: "使用记录", control: showUsageHistorySwitch)
             ])
         ])

@@ -289,59 +289,26 @@ private final class UsageContentView: NSView {
 
     private func makeDailyUsageRow(_ usage: DailyUsage) -> NSView {
         let title = label("每日用量", size: 11, weight: .semibold)
-        let value = label(
-            "\(currency(usage.used)) / \(currency(usage.total))",
-            size: 11,
-            weight: .medium,
-            color: .secondaryLabelColor
-        )
-        value.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        value.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let top = NSStackView(views: [title, NSView(), value])
-        top.orientation = .horizontal
-        top.alignment = .firstBaseline
-        top.spacing = 6
-        top.widthAnchor.constraint(equalToConstant: 286).isActive = true
-
-        let subscription = label(
-            usage.subscriptionName ?? "当前订阅",
-            size: 10,
-            color: .secondaryLabelColor
-        )
-        subscription.widthAnchor.constraint(equalToConstant: 286).isActive = true
-
-        let quota = label(
-            "额度：\(currency(usage.used)) / \(currency(usage.total))",
-            size: 10,
-            color: .secondaryLabelColor
-        )
-        quota.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         let progress = ThinQuotaProgressView(progress: usage.progress)
         progress.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             progress.widthAnchor.constraint(equalToConstant: 286),
             progress.heightAnchor.constraint(equalToConstant: 4)
         ])
+        let quota = label(
+            "额度：\(currency(usage.used)) / \(currency(usage.total))",
+            size: 10,
+            color: .secondaryLabelColor
+        )
+        quota.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         let details = NSStackView(views: [quota, progress])
         details.orientation = .vertical
         details.alignment = .leading
         details.spacing = 4
-
-        var views: [NSView] = [top, subscription, details]
-        if let resetAt = usage.resetAt {
-            let reset = label(
-                "今日窗口 \(resetDateFormatter.string(from: resetAt)) 重置",
-                size: 9,
-                color: .tertiaryLabelColor
-            )
-            reset.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
-            views.append(reset)
-        }
-        let stack = NSStackView(views: views)
+        let stack = NSStackView(views: [title, details])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 3
+        stack.spacing = 5
         stack.widthAnchor.constraint(equalToConstant: 286).isActive = true
         return stack
     }
