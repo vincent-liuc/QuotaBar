@@ -11,6 +11,7 @@ struct UserPreferences: Equatable, Sendable {
     let showAPIKeyDetails: Bool
     let showMetricCards: Bool
     let showUsageHistory: Bool
+    let showDailyUsage: Bool
     let automaticallyUpdates: Bool
 
     init(
@@ -19,6 +20,7 @@ struct UserPreferences: Equatable, Sendable {
         showAPIKeyDetails: Bool = true,
         showMetricCards: Bool = true,
         showUsageHistory: Bool = true,
+        showDailyUsage: Bool = true,
         automaticallyUpdates: Bool = true
     ) {
         self.refreshInterval = Self.normalizedRefreshInterval(refreshInterval)
@@ -26,6 +28,7 @@ struct UserPreferences: Equatable, Sendable {
         self.showAPIKeyDetails = showAPIKeyDetails
         self.showMetricCards = showMetricCards
         self.showUsageHistory = showUsageHistory
+        self.showDailyUsage = showDailyUsage
         self.automaticallyUpdates = automaticallyUpdates
     }
 
@@ -49,6 +52,7 @@ final class PreferencesStore: @unchecked Sendable {
         static let showAPIKeyDetails = "showAPIKeyDetails"
         static let showMetricCards = "showMetricCards"
         static let showUsageHistory = "showUsageHistory"
+        static let showDailyUsage = "showDailyUsage"
         static let automaticallyUpdates = "automaticallyUpdates"
         static let launchRegistrationVersion = "launchRegistrationVersion"
     }
@@ -76,6 +80,9 @@ final class PreferencesStore: @unchecked Sendable {
         let showUsageHistory = defaults.object(forKey: Key.showUsageHistory) == nil
             ? true
             : defaults.bool(forKey: Key.showUsageHistory)
+        let showDailyUsage = defaults.object(forKey: Key.showDailyUsage) == nil
+            ? true
+            : defaults.bool(forKey: Key.showDailyUsage)
         let automaticallyUpdates = defaults.object(forKey: Key.automaticallyUpdates) == nil
             ? true
             : defaults.bool(forKey: Key.automaticallyUpdates)
@@ -86,6 +93,7 @@ final class PreferencesStore: @unchecked Sendable {
             showAPIKeyDetails: showAPIKeyDetails,
             showMetricCards: showMetricCards,
             showUsageHistory: showUsageHistory,
+            showDailyUsage: showDailyUsage,
             automaticallyUpdates: automaticallyUpdates
         )
     }
@@ -97,6 +105,7 @@ final class PreferencesStore: @unchecked Sendable {
         defaults.set(preferences.showAPIKeyDetails, forKey: Key.showAPIKeyDetails)
         defaults.set(preferences.showMetricCards, forKey: Key.showMetricCards)
         defaults.set(preferences.showUsageHistory, forKey: Key.showUsageHistory)
+        defaults.set(preferences.showDailyUsage, forKey: Key.showDailyUsage)
         defaults.set(preferences.automaticallyUpdates, forKey: Key.automaticallyUpdates)
     }
 
@@ -119,6 +128,7 @@ enum AppDataMigration {
         "showAPIKeyDetails",
         "showMetricCards",
         "showUsageHistory",
+        "showDailyUsage",
         "automaticallyUpdates",
         "launchRegistrationVersion"
     ]

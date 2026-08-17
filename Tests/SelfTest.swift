@@ -162,12 +162,14 @@ enum SelfTest {
             showAPIKeyDetails: false,
             showMetricCards: false,
             showUsageHistory: false,
+            showDailyUsage: false,
             automaticallyUpdates: false
         )
         require(preferences.launchAtLogin, "launch-at-login preference")
         require(!preferences.showAPIKeyDetails, "API key details preference")
         require(!preferences.showMetricCards, "metric cards preference")
         require(!preferences.showUsageHistory, "usage history preference")
+        require(!preferences.showDailyUsage, "daily usage preference")
         require(!preferences.automaticallyUpdates, "automatic update preference")
 
         let suiteName = "dev.ruobin.QuotaBar.SelfTest.\(UUID().uuidString)"
@@ -179,6 +181,7 @@ enum SelfTest {
         require(initial.showAPIKeyDetails, "API key details default enabled")
         require(initial.showMetricCards, "metric cards default enabled")
         require(initial.showUsageHistory, "usage history default enabled")
+        require(initial.showDailyUsage, "daily usage default enabled")
         require(initial.automaticallyUpdates, "automatic updates default enabled")
         store.save(preferences)
         require(store.load() == preferences, "display preferences persisted")
@@ -833,7 +836,7 @@ enum SelfTest {
                 }
                 return mockResponse(
                     url: url,
-                    json: #"{"code":0,"message":"success","data":[{"id":10,"name":"Weekly","status":"active","weekly_usage_usd":52.71,"weekly_window_start":"2026-08-11T09:37:50+08:00","expires_at":"2026-09-14T13:42:26+08:00","group":{"weekly_limit_usd":500}}]}"#
+                    json: #"{"code":0,"message":"success","data":[{"id":10,"name":"Weekly","status":"active","weekly_usage_usd":52.71,"daily_usage_usd":6.25,"daily_window_start":"2026-08-17T09:37:50+08:00","weekly_window_start":"2026-08-11T09:37:50+08:00","expires_at":"2026-09-14T13:42:26+08:00","group":{"weekly_limit_usd":500,"daily_limit_usd":20}}]}"#
                 )
             }
             if url.path.hasSuffix("/api/v1/usage/dashboard/stats") {
@@ -918,12 +921,15 @@ enum SelfTest {
         require(usage.weeklyUsage?.used == 52.71, "weekly usage decoded")
         require(usage.weeklyUsage?.total == 500, "nested weekly limit decoded")
         require(usage.weeklyUsage?.resetAt != nil, "weekly reset derived from window start")
+        require(usage.dailyUsage?.used == 6.25, "daily subscription usage decoded")
+        require(usage.dailyUsage?.total == 20, "nested daily limit decoded")
+        require(usage.dailyUsage?.subscriptionName == "Weekly", "daily usage uses selected subscription")
         require(usage.accountMetrics?.totalTokens == 137_630_389, "total tokens decoded")
         require(usage.accountMetrics?.totalActualCost == 106.38925756, "total actual cost decoded")
         require(usage.capabilities.contains(.apiKeyDailyUsage), "daily usage capability detected")
         require(usage.capabilities.contains(.usageHistory), "usage history capability detected")
         require(usage.usageRecords?.count == 12, "all fetched usage history retained in data layer")
-        let snapshot = UsageSnapshot(weeklyUsage: usage.weeklyUsage, keys: usage.keys, usageRecords: usage.usageRecords)
+        let snapshot = UsageSnapshot(weeklyUsage: usage.weeklyUsage, dailyUsage: usage.dailyUsage, keys: usage.keys, usageRecords: usage.usageRecords)
         require(snapshot.usageRecords?.count == 12, "dashboard retains fetched usage history for scrolling")
     }
 
@@ -1115,6 +1121,7 @@ private actor OnboardingUsageClient: UsageFetching {
         if let fetchError { throw fetchError }
         return UsageData(
             weeklyUsage: WeeklyUsage(used: 1, total: 10),
+            dailyUsage: nil,
             accountMetrics: AccountMetrics(totalTokens: 100, totalActualCost: 1),
             keys: [],
             usageRecords: [],
@@ -1175,6 +1182,7 @@ private actor ControlledRefreshUsageClient: UsageFetching {
         guard let continuation = pending.removeValue(forKey: profileID) else { return }
         continuation.resume(returning: UsageData(
             weeklyUsage: nil,
+            dailyUsage: nil,
             accountMetrics: AccountMetrics(totalTokens: Int64(totalActualCost), totalActualCost: totalActualCost),
             keys: [],
             usageRecords: [],

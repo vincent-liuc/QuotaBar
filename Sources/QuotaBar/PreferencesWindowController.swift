@@ -69,6 +69,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let showAPIKeyDetailsSwitch = NSSwitch()
     private let showMetricCardsSwitch = NSSwitch()
     private let showUsageHistorySwitch = NSSwitch()
+    private let showDailyUsageSwitch = NSSwitch()
     private let automaticallyUpdatesSwitch = NSSwitch()
     private let messageLabel = settingsLabel("", size: 11, color: .systemRed)
     private let connectionLabel = settingsLabel("尚未检测", size: 11, color: .secondaryLabelColor)
@@ -180,6 +181,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         showAPIKeyDetailsSwitch.state = store.preferences.showAPIKeyDetails ? .on : .off
         showMetricCardsSwitch.state = store.preferences.showMetricCards ? .on : .off
         showUsageHistorySwitch.state = store.preferences.showUsageHistory ? .on : .off
+        showDailyUsageSwitch.state = store.preferences.showDailyUsage ? .on : .off
         automaticallyUpdatesSwitch.state = store.preferences.automaticallyUpdates ? .on : .off
 
         let timezoneIDs = ["Asia/Shanghai", TimeZone.current.identifier, "UTC"].uniqued()
@@ -197,7 +199,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         subscriptionPopup.action = #selector(profileSelectionChanged)
         automaticallyResetsAPIKeyQuotaSwitch.target = self
         automaticallyResetsAPIKeyQuotaSwitch.action = #selector(profileSelectionChanged)
-        [launchAtLoginSwitch, showAPIKeyDetailsSwitch, showMetricCardsSwitch, showUsageHistorySwitch, automaticallyUpdatesSwitch].forEach {
+        [launchAtLoginSwitch, showAPIKeyDetailsSwitch, showMetricCardsSwitch, showUsageHistorySwitch, showDailyUsageSwitch, automaticallyUpdatesSwitch].forEach {
             $0.target = self
             $0.action = #selector(preferenceControlChanged)
         }
@@ -342,6 +344,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             settingsPanel([
                 settingsRow(title: "累计指标", control: showMetricCardsSwitch),
                 settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch),
+                settingsRow(title: "每日用量", control: showDailyUsageSwitch),
                 settingsRow(title: "使用记录", control: showUsageHistorySwitch)
             ])
         ])
@@ -855,6 +858,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
                 showAPIKeyDetails: showAPIKeyDetailsSwitch.state == .on,
                 showMetricCards: showMetricCardsSwitch.state == .on,
                 showUsageHistory: showUsageHistorySwitch.state == .on,
+                showDailyUsage: showDailyUsageSwitch.state == .on,
                 automaticallyUpdates: automaticallyUpdatesSwitch.state == .on
             ))
             clearMessage()

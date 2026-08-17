@@ -250,9 +250,11 @@ struct DashboardStats: Decodable, Sendable {
 
 struct SubscriptionGroup: Decodable, Sendable {
     let weeklyLimitUSD: Double?
+    let dailyLimitUSD: Double?
 
     enum CodingKeys: String, CodingKey {
         case weeklyLimitUSD = "weekly_limit_usd"
+        case dailyLimitUSD = "daily_limit_usd"
     }
 }
 
@@ -262,6 +264,9 @@ struct SubscriptionRecord: Decodable, Sendable {
     let name: String?
     let weeklyUsageUSD: Double?
     let directWeeklyLimitUSD: Double?
+    let dailyUsageUSD: Double?
+    let directDailyLimitUSD: Double?
+    let dailyWindowStart: Date?
     let weeklyWindowStart: Date?
     let expiresAt: Date?
     let group: SubscriptionGroup?
@@ -270,11 +275,15 @@ struct SubscriptionRecord: Decodable, Sendable {
         case id, status, group, name
         case weeklyUsageUSD = "weekly_usage_usd"
         case directWeeklyLimitUSD = "weekly_limit_usd"
+        case dailyUsageUSD = "daily_usage_usd"
+        case directDailyLimitUSD = "daily_limit_usd"
+        case dailyWindowStart = "daily_window_start"
         case weeklyWindowStart = "weekly_window_start"
         case expiresAt = "expires_at"
     }
 
     var weeklyLimitUSD: Double? { directWeeklyLimitUSD ?? group?.weeklyLimitUSD }
+    var dailyLimitUSD: Double? { directDailyLimitUSD ?? group?.dailyLimitUSD }
 }
 
 struct WeeklyUsage: Equatable, Sendable {
@@ -296,6 +305,33 @@ struct WeeklyUsage: Equatable, Sendable {
         self.used = used
         self.total = total
         self.resetAt = resetAt
+    }
+}
+
+struct DailyUsage: Equatable, Sendable {
+    let subscriptionID: Int?
+    let subscriptionName: String?
+    let used: Double
+    let total: Double
+    let resetAt: Date?
+
+    init(
+        subscriptionID: Int? = nil,
+        subscriptionName: String? = nil,
+        used: Double,
+        total: Double,
+        resetAt: Date? = nil
+    ) {
+        self.subscriptionID = subscriptionID
+        self.subscriptionName = subscriptionName
+        self.used = used
+        self.total = total
+        self.resetAt = resetAt
+    }
+
+    var progress: Double {
+        guard total > 0 else { return 0 }
+        return min(max(used / total, 0), 1)
     }
 }
 
@@ -334,6 +370,7 @@ enum MetricTokensPeriod: String, Equatable, Sendable {
 
 struct UsageData: Equatable, Sendable {
     let weeklyUsage: WeeklyUsage?
+    let dailyUsage: DailyUsage?
     let accountMetrics: AccountMetrics?
     let keys: [UsageKey]
     let usageRecords: [UsageRecord]?
@@ -425,6 +462,7 @@ struct UsageSnapshot: Equatable, Sendable {
     let keys: [UsageKey]
     let usageRecords: [UsageRecord]?
     let weeklyUsage: WeeklyUsage?
+    let dailyUsage: DailyUsage?
     let used: Double
     let total: Double
     let accountMetrics: AccountMetrics?
@@ -443,6 +481,7 @@ struct UsageSnapshot: Equatable, Sendable {
 
     init(
         weeklyUsage: WeeklyUsage?,
+        dailyUsage: DailyUsage? = nil,
         accountMetrics: AccountMetrics? = nil,
         keys: [UsageKey],
         usageRecords: [UsageRecord]? = nil,
@@ -455,6 +494,7 @@ struct UsageSnapshot: Equatable, Sendable {
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
         self.weeklyUsage = weeklyUsage
+        self.dailyUsage = dailyUsage
         self.usageRecords = usageRecords.map { Array($0.prefix(Self.maximumUsageRecords)) }
         used = weeklyUsage?.used ?? 0
         total = weeklyUsage?.total ?? 0

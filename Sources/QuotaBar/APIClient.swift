@@ -184,7 +184,11 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         let metricsResult = await accountMetrics
         let usageResult = await todayUsage
         let historyResult = await usageHistory
-        let weeklyUsage = subscriptionResult.flatMap { selectWeeklyUsage($0, selection: profile.subscriptionSelection) }
+        let selectedSubscription = subscriptionResult.flatMap {
+            selectSubscription($0, selection: profile.subscriptionSelection)
+        }
+        let weeklyUsage = selectedSubscription.flatMap(makeWeeklyUsage)
+        let dailyUsage = selectedSubscription.flatMap(makeDailyUsage)
         let keysWithUsage = keys.map { key in
             var updated = key
             updated.todayActualCost = usageResult.map { $0[key.id] ?? 0 }
@@ -198,6 +202,7 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         if historyResult != nil { capabilities.insert(.usageHistory) }
         return UsageData(
             weeklyUsage: weeklyUsage,
+            dailyUsage: dailyUsage,
             accountMetrics: metricsResult,
             keys: keysWithUsage,
             usageRecords: historyResult,
@@ -263,6 +268,7 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         if historyResult != nil { capabilities.insert(.usageHistory) }
         return UsageData(
             weeklyUsage: accountPool,
+            dailyUsage: nil,
             accountMetrics: metrics,
             keys: keysWithUsage,
             usageRecords: historyResult,
@@ -274,22 +280,24 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         do { return try await operation() } catch { return nil }
     }
 
-    private func selectWeeklyUsage(
+    private func selectSubscription(
         _ subscriptions: [SubscriptionRecord],
         selection: SubscriptionSelection
-    ) -> WeeklyUsage? {
-        let subscription: SubscriptionRecord?
+    ) -> SubscriptionRecord? {
         switch selection {
         case .automatic:
             let active = subscriptions.filter { $0.status == "active" }
-            subscription = active.first(where: { $0.weeklyLimitUSD != nil })
+            return active.first(where: { $0.weeklyLimitUSD != nil })
                 ?? active.first
                 ?? subscriptions.first(where: { $0.weeklyLimitUSD != nil })
                 ?? subscriptions.first
         case .manual(let id):
-            subscription = subscriptions.first { $0.id == id && $0.status == "active" }
+            return subscriptions.first { $0.id == id && $0.status == "active" }
         }
-        guard let subscription, let total = subscription.weeklyLimitUSD else { return nil }
+    }
+
+    private func makeWeeklyUsage(_ subscription: SubscriptionRecord) -> WeeklyUsage? {
+        guard let total = subscription.weeklyLimitUSD else { return nil }
         return WeeklyUsage(
             kind: .weekly,
             subscriptionID: subscription.id,
@@ -297,6 +305,20 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
             total: max(total, 0),
             resetAt: WeeklyResetCalculator.nextReset(
                 windowStart: subscription.weeklyWindowStart,
+                expiresAt: subscription.expiresAt
+            )
+        )
+    }
+
+    private func makeDailyUsage(_ subscription: SubscriptionRecord) -> DailyUsage? {
+        guard let total = subscription.dailyLimitUSD else { return nil }
+        return DailyUsage(
+            subscriptionID: subscription.id,
+            subscriptionName: subscription.name,
+            used: max(subscription.dailyUsageUSD ?? 0, 0),
+            total: max(total, 0),
+            resetAt: DailyResetCalculator.nextReset(
+                windowStart: subscription.dailyWindowStart,
                 expiresAt: subscription.expiresAt
             )
         )
@@ -715,6 +737,19 @@ private func unixDayWindow(timezone: String, now: Date = Date()) throws -> UnixD
 
 enum WeeklyResetCalculator {
     static let period: TimeInterval = 7 * 24 * 60 * 60
+
+    static func nextReset(windowStart: Date?, expiresAt: Date?, now: Date = Date()) -> Date? {
+        guard let windowStart else { return nil }
+        let elapsed = max(now.timeIntervalSince(windowStart), 0)
+        let completedPeriods = floor(elapsed / period)
+        let candidate = windowStart.addingTimeInterval((completedPeriods + 1) * period)
+        if let expiresAt, candidate >= expiresAt { return nil }
+        return candidate
+    }
+}
+
+enum DailyResetCalculator {
+    static let period: TimeInterval = 24 * 60 * 60
 
     static func nextReset(windowStart: Date?, expiresAt: Date?, now: Date = Date()) -> Date? {
         guard let windowStart else { return nil }

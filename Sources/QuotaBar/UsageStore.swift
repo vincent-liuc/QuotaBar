@@ -238,6 +238,7 @@ final class UsageStore {
         showAPIKeyDetails: Bool,
         showMetricCards: Bool,
         showUsageHistory: Bool,
+        showDailyUsage: Bool = true,
         automaticallyUpdates: Bool,
         makeActive: Bool = true
     ) async throws {
@@ -259,6 +260,7 @@ final class UsageStore {
             showAPIKeyDetails: showAPIKeyDetails,
             showMetricCards: showMetricCards,
             showUsageHistory: showUsageHistory,
+            showDailyUsage: showDailyUsage,
             automaticallyUpdates: automaticallyUpdates
         )
         try credentialStore.save(credentials, for: validatedProfile.id)
@@ -389,6 +391,7 @@ final class UsageStore {
             guard isCurrentRefresh(refreshID, profileID: profile.id) else { return }
             snapshot = UsageSnapshot(
                 weeklyUsage: usage.weeklyUsage,
+                dailyUsage: usage.dailyUsage,
                 accountMetrics: usage.accountMetrics,
                 keys: usage.keys,
                 usageRecords: usage.usageRecords
