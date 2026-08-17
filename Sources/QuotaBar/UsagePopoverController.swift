@@ -8,12 +8,17 @@ final class UsagePopoverController: NSViewController {
     private let refreshButton = NSButton()
     private let settingsButton = NSButton()
     private let headerUpdatedLabel = NSTextField(labelWithString: "")
+    private let stationSwitcher: StationSwitcherControl
     private var bodyView: NSView?
 
     init(store: UsageStore, showPreferences: @escaping (SettingsTab) -> Void) {
         self.store = store
         self.showPreferences = showPreferences
+        stationSwitcher = StationSwitcherControl()
         super.init(nibName: nil, bundle: nil)
+        stationSwitcher.onSelect = { [weak self] profileID in
+            self?.selectStation(profileID)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -67,6 +72,10 @@ final class UsagePopoverController: NSViewController {
         ])
         bodyView = nextBody
 
+        stationSwitcher.update(
+            profiles: store.profiles,
+            activeProfileID: store.activeProfileID
+        )
         refreshButton.image = symbol(store.isRefreshing ? "hourglass" : "arrow.clockwise")
         refreshButton.isEnabled = !store.isRefreshing
         settingsButton.image = symbol("list.bullet", pointSize: 14)
@@ -80,9 +89,6 @@ final class UsagePopoverController: NSViewController {
     }
 
     private func makeHeader() -> NSView {
-        let title = label("Dashboard", size: 12, color: .secondaryLabelColor)
-        title.setContentHuggingPriority(.required, for: .horizontal)
-
         configureIconButton(refreshButton, symbolName: "arrow.clockwise", toolTip: "立即刷新")
         refreshButton.target = self
         refreshButton.action = #selector(refresh)
@@ -102,12 +108,26 @@ final class UsagePopoverController: NSViewController {
         headerUpdatedLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let spacer = NSView()
-        let stack = NSStackView(views: [title, spacer, headerUpdatedLabel, actions])
+        let stack = NSStackView(views: [stationSwitcher, spacer, headerUpdatedLabel, actions])
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 5
         stack.edgeInsets = NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 7)
         return stack
+    }
+
+    private func selectStation(_ profileID: UUID) {
+        guard profileID != store.activeProfileID else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await store.selectProfile(profileID)
+            } catch StationProfileError.missingCredentials {
+                showPreferences(.account)
+            } catch {
+                NSSound.beep()
+            }
+        }
     }
 
     @objc private func refresh() {
@@ -800,6 +820,281 @@ private final class DashboardActionButton: NSButton {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     @objc private func activate() { handler() }
+}
+
+@MainActor
+private final class StationSwitcherControl: NSControl {
+    var onSelect: ((UUID) -> Void)?
+
+    private var profiles: [StationProfile] = []
+    private var activeProfileID: UUID?
+    private var isHovered = false
+    private var trackingAreaReference: NSTrackingArea?
+    private let menuPopover = NSPopover()
+
+    override var intrinsicContentSize: NSSize {
+        let name = profiles.first(where: { $0.id == activeProfileID })?.name ?? "当前站点"
+        let width = min(max(measuredNameWidth(name) + 34, 84), 148)
+        return NSSize(width: width, height: 23)
+    }
+
+    override var isEnabled: Bool {
+        didSet {
+            if !isEnabled, menuPopover.isShown { menuPopover.performClose(nil) }
+            needsDisplay = true
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        setAccessibilityRole(.popUpButton)
+        updateAccessibility()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(profiles: [StationProfile], activeProfileID: UUID?) {
+        self.profiles = profiles
+        self.activeProfileID = activeProfileID
+        isEnabled = profiles.count > 1
+        updateAccessibility()
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+        if menuPopover.isShown {
+            menuPopover.performClose(nil)
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func updateTrackingAreas() {
+        if let trackingAreaReference { removeTrackingArea(trackingAreaReference) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingAreaReference = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        needsDisplay = true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled, profiles.count > 1 else { return }
+        if menuPopover.isShown {
+            menuPopover.performClose(nil)
+        } else {
+            showMenu()
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let radius = bounds.height / 2
+        let pill = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
+        let fillColor: NSColor = isEnabled && isHovered
+            ? .controlAccentColor.withAlphaComponent(0.12)
+            : .controlBackgroundColor.withAlphaComponent(isEnabled ? 0.58 : 0.35)
+        fillColor.setFill()
+        pill.fill()
+
+        let scale = window?.backingScaleFactor ?? 2
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5 / scale, dy: 0.5 / scale), xRadius: radius, yRadius: radius)
+        border.lineWidth = 1 / scale
+        (isEnabled ? NSColor.separatorColor.withAlphaComponent(0.58) : NSColor.separatorColor.withAlphaComponent(0.32)).setStroke()
+        border.stroke()
+
+        let name = profiles.first(where: { $0.id == activeProfileID })?.name ?? "当前站点"
+        let textColor: NSColor = isEnabled ? .labelColor : .secondaryLabelColor
+        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let availableWidth = bounds.width - (isEnabled ? 28 : 16)
+        let displayName = truncatedName(name, font: font, maxWidth: availableWidth)
+        let textSize = displayName.size(withAttributes: [.font: font])
+        let textRect = NSRect(
+            x: 9,
+            y: (bounds.height - textSize.height) / 2 + 0.5,
+            width: min(textSize.width, availableWidth),
+            height: textSize.height
+        )
+        displayName.draw(in: textRect, withAttributes: [.font: font, .foregroundColor: textColor])
+
+        if isEnabled {
+            let chevron = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
+                .withSymbolConfiguration(.init(pointSize: 8, weight: .semibold))
+            chevron?.isTemplate = true
+            let iconRect = NSRect(x: bounds.width - 18, y: (bounds.height - 10) / 2, width: 10, height: 10)
+            (isHovered ? NSColor.controlAccentColor : NSColor.secondaryLabelColor).set()
+            chevron?.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1)
+        }
+    }
+
+    private func showMenu() {
+        let controller = StationSwitcherMenuViewController(
+            profiles: profiles,
+            activeProfileID: activeProfileID,
+            onSelect: { [weak self] profileID in
+                self?.menuPopover.performClose(nil)
+                self?.onSelect?(profileID)
+            }
+        )
+        menuPopover.contentViewController = controller
+        menuPopover.behavior = .transient
+        menuPopover.animates = true
+        menuPopover.show(relativeTo: bounds, of: self, preferredEdge: .maxY)
+    }
+
+    private func updateAccessibility() {
+        let name = profiles.first(where: { $0.id == activeProfileID })?.name ?? "当前站点"
+        setAccessibilityLabel("当前站点：\(name)")
+        setAccessibilityHelp(isEnabled ? "切换站点" : "仅配置一个站点，无法切换")
+        setAccessibilityRole(.popUpButton)
+    }
+
+    private func measuredNameWidth(_ name: String) -> CGFloat {
+        name.size(withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .medium)]).width
+    }
+
+    private func truncatedName(_ name: String, font: NSFont, maxWidth: CGFloat) -> String {
+        guard name.size(withAttributes: [.font: font]).width > maxWidth else { return name }
+        var result = name
+        while !result.isEmpty && (result + "…").size(withAttributes: [.font: font]).width > maxWidth {
+            result.removeLast()
+        }
+        return result.isEmpty ? "…" : result + "…"
+    }
+}
+
+@MainActor
+private final class StationSwitcherMenuViewController: NSViewController {
+    private let profiles: [StationProfile]
+    private let activeProfileID: UUID?
+    private let onSelect: (UUID) -> Void
+
+    init(profiles: [StationProfile], activeProfileID: UUID?, onSelect: @escaping (UUID) -> Void) {
+        self.profiles = profiles
+        self.activeProfileID = activeProfileID
+        self.onSelect = onSelect
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func loadView() {
+        let root = StationSwitcherMenuView()
+        root.onSelect = onSelect
+        root.configure(profiles: profiles, activeProfileID: activeProfileID)
+        view = root
+        preferredContentSize = root.intrinsicContentSize
+    }
+}
+
+@MainActor
+private final class StationSwitcherMenuView: NSView {
+    var onSelect: ((UUID) -> Void)?
+
+    private var rows: [StationSwitcherRow] = []
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 214, height: CGFloat(max(rows.count, 1)) * 36 + 12)
+    }
+
+    func configure(profiles: [StationProfile], activeProfileID: UUID?) {
+        rows.forEach { $0.removeFromSuperview() }
+        rows = profiles.map { profile in
+            let row = StationSwitcherRow(profile: profile, isSelected: profile.id == activeProfileID)
+            row.onSelect = { [weak self] id in self?.onSelect?(id) }
+            addSubview(row)
+            return row
+        }
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        var y = bounds.height - 6
+        for row in rows {
+            y -= 32
+            row.frame = NSRect(x: 6, y: y, width: bounds.width - 12, height: 32)
+            y -= 4
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let radius: CGFloat = 10
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
+        NSColor.controlBackgroundColor.withAlphaComponent(0.92).setFill()
+        path.fill()
+        path.lineWidth = 1
+        NSColor.separatorColor.withAlphaComponent(0.42).setStroke()
+        path.stroke()
+    }
+}
+
+@MainActor
+private final class StationSwitcherRow: NSControl {
+    private let profile: StationProfile
+    private let isSelected: Bool
+    private var isHovered = false
+    private var trackingAreaReference: NSTrackingArea?
+    var onSelect: ((UUID) -> Void)?
+
+    init(profile: StationProfile, isSelected: Bool) {
+        self.profile = profile
+        self.isSelected = isSelected
+        super.init(frame: .zero)
+        setAccessibilityRole(.menuItem)
+        setAccessibilityLabel(profile.name)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func updateTrackingAreas() {
+        if let trackingAreaReference { removeTrackingArea(trackingAreaReference) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingAreaReference = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true; needsDisplay = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false; needsDisplay = true }
+    override func mouseDown(with event: NSEvent) { onSelect?(profile.id) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let radius: CGFloat = 7
+        if isSelected || isHovered {
+            (isSelected ? NSColor.controlAccentColor.withAlphaComponent(0.14) : NSColor.labelColor.withAlphaComponent(0.06)).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
+        }
+
+        let font = NSFont.systemFont(ofSize: 11, weight: isSelected ? .semibold : .regular)
+        let color: NSColor = isSelected ? .controlAccentColor : .labelColor
+        let textRect = NSRect(x: 12, y: (bounds.height - font.pointSize - 2) / 2, width: bounds.width - 36, height: font.pointSize + 4)
+        profile.name.draw(in: textRect, withAttributes: [.font: font, .foregroundColor: color])
+        if isSelected {
+            let check = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
+            check?.isTemplate = true
+            NSColor.controlAccentColor.set()
+            check?.draw(in: NSRect(x: bounds.width - 23, y: (bounds.height - 12) / 2, width: 12, height: 12), from: .zero, operation: .sourceOver, fraction: 1)
+        }
+    }
 }
 
 private final class PopoverPanelView: NSView {
