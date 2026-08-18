@@ -10,6 +10,7 @@ final class UsagePopoverController: NSViewController {
     private let headerUpdatedLabel = NSTextField(labelWithString: "")
     private let stationSwitcher: StationSwitcherControl
     private var bodyView: NSView?
+    private var stationSwitchBodyHeight: CGFloat?
 
     init(store: UsageStore, showPreferences: @escaping (SettingsTab) -> Void) {
         self.store = store
@@ -61,7 +62,13 @@ final class UsagePopoverController: NSViewController {
         guard isViewLoaded else { return }
         bodyView?.removeFromSuperview()
 
-        let nextBody = UsageContentView(store: store, showPreferences: showPreferences)
+        let retainedBodyHeight = stationSwitchBodyHeight
+        let isRetainingStationSwitchHeight = retainedBodyHeight != nil && store.phase == .loading
+        let nextBody = UsageContentView(
+            store: store,
+            showPreferences: showPreferences,
+            loadingHeight: isRetainingStationSwitchHeight ? retainedBodyHeight : nil
+        )
         nextBody.translatesAutoresizingMaskIntoConstraints = false
         bodyContainer.addSubview(nextBody)
         NSLayoutConstraint.activate([
@@ -85,7 +92,12 @@ final class UsagePopoverController: NSViewController {
         } ?? ""
         nextBody.layoutSubtreeIfNeeded()
         let bodyHeight = nextBody.fittingSize.height
-        preferredContentSize = NSSize(width: 332, height: max(bodyHeight + 32, 150))
+        if isRetainingStationSwitchHeight, let retainedBodyHeight {
+            preferredContentSize = NSSize(width: 332, height: max(retainedBodyHeight + 32, 150))
+        } else {
+            stationSwitchBodyHeight = nil
+            preferredContentSize = NSSize(width: 332, height: max(bodyHeight + 32, 150))
+        }
     }
 
     private func makeHeader() -> NSView {
@@ -118,13 +130,19 @@ final class UsagePopoverController: NSViewController {
 
     private func selectStation(_ profileID: UUID) {
         guard profileID != store.activeProfileID else { return }
+        let currentBodyHeight = preferredContentSize.height - 32
+        if currentBodyHeight > 0 {
+            stationSwitchBodyHeight = currentBodyHeight
+        }
         Task { [weak self] in
             guard let self else { return }
             do {
                 try await store.selectProfile(profileID)
             } catch StationProfileError.missingCredentials {
+                stationSwitchBodyHeight = nil
                 showPreferences(.account)
             } catch {
+                stationSwitchBodyHeight = nil
                 NSSound.beep()
             }
         }
@@ -160,9 +178,15 @@ final class UsagePopoverController: NSViewController {
 @MainActor
 private final class UsageContentView: NSView {
     private let showPreferences: (SettingsTab) -> Void
+    private let loadingHeight: CGFloat?
 
-    init(store: UsageStore, showPreferences: @escaping (SettingsTab) -> Void) {
+    init(
+        store: UsageStore,
+        showPreferences: @escaping (SettingsTab) -> Void,
+        loadingHeight: CGFloat? = nil
+    ) {
         self.showPreferences = showPreferences
+        self.loadingHeight = loadingHeight
         super.init(frame: .zero)
 
         let content = NSStackView()
@@ -190,7 +214,7 @@ private final class UsageContentView: NSView {
                 stationKind: store.activeProfile?.kind ?? .sub2API
             ))
         } else if store.phase == .loading {
-            content.addArrangedSubview(makeLoadingView())
+            content.addArrangedSubview(makeLoadingView(height: loadingHeight))
         }
 
         if case .failed(let issue) = store.phase {
@@ -693,7 +717,7 @@ private final class UsageContentView: NSView {
         return container
     }
 
-    private func makeLoadingView() -> NSView {
+    private func makeLoadingView(height: CGFloat? = nil) -> NSView {
         let container = NSView()
         let animation = LoadingCatAnimationView()
         animation.translatesAutoresizingMaskIntoConstraints = false
@@ -707,7 +731,7 @@ private final class UsageContentView: NSView {
         container.addSubview(stack)
         NSLayoutConstraint.activate([
             container.widthAnchor.constraint(equalToConstant: 316),
-            container.heightAnchor.constraint(equalToConstant: 110),
+            container.heightAnchor.constraint(equalToConstant: max(height ?? 110, 110)),
             animation.widthAnchor.constraint(equalToConstant: 88),
             animation.heightAnchor.constraint(equalToConstant: 24),
             stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
