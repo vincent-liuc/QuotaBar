@@ -10,6 +10,7 @@ struct UserPreferences: Equatable, Sendable {
     let launchAtLogin: Bool
     let showAPIKeyDetails: Bool
     let showMetricCards: Bool
+    let showSubscriptionQuota: Bool
     let showUsageHistory: Bool
     let showDailyUsage: Bool
     let automaticallyUpdates: Bool
@@ -19,6 +20,7 @@ struct UserPreferences: Equatable, Sendable {
         launchAtLogin: Bool,
         showAPIKeyDetails: Bool = true,
         showMetricCards: Bool = true,
+        showSubscriptionQuota: Bool = true,
         showUsageHistory: Bool = true,
         showDailyUsage: Bool = true,
         automaticallyUpdates: Bool = true
@@ -27,6 +29,7 @@ struct UserPreferences: Equatable, Sendable {
         self.launchAtLogin = launchAtLogin
         self.showAPIKeyDetails = showAPIKeyDetails
         self.showMetricCards = showMetricCards
+        self.showSubscriptionQuota = showSubscriptionQuota
         self.showUsageHistory = showUsageHistory
         self.showDailyUsage = showDailyUsage
         self.automaticallyUpdates = automaticallyUpdates
@@ -51,6 +54,7 @@ final class PreferencesStore: @unchecked Sendable {
         static let launchAtLogin = "launchAtLogin"
         static let showAPIKeyDetails = "showAPIKeyDetails"
         static let showMetricCards = "showMetricCards"
+        static let showSubscriptionQuota = "showSubscriptionQuota"
         static let showUsageHistory = "showUsageHistory"
         static let showDailyUsage = "showDailyUsage"
         static let automaticallyUpdates = "automaticallyUpdates"
@@ -77,6 +81,9 @@ final class PreferencesStore: @unchecked Sendable {
         let showMetricCards = defaults.object(forKey: Key.showMetricCards) == nil
             ? true
             : defaults.bool(forKey: Key.showMetricCards)
+        let showSubscriptionQuota = defaults.object(forKey: Key.showSubscriptionQuota) == nil
+            ? true
+            : defaults.bool(forKey: Key.showSubscriptionQuota)
         let showUsageHistory = defaults.object(forKey: Key.showUsageHistory) == nil
             ? true
             : defaults.bool(forKey: Key.showUsageHistory)
@@ -92,6 +99,7 @@ final class PreferencesStore: @unchecked Sendable {
             launchAtLogin: launchAtLogin,
             showAPIKeyDetails: showAPIKeyDetails,
             showMetricCards: showMetricCards,
+            showSubscriptionQuota: showSubscriptionQuota,
             showUsageHistory: showUsageHistory,
             showDailyUsage: showDailyUsage,
             automaticallyUpdates: automaticallyUpdates
@@ -104,6 +112,7 @@ final class PreferencesStore: @unchecked Sendable {
         defaults.set(preferences.launchAtLogin, forKey: Key.launchAtLogin)
         defaults.set(preferences.showAPIKeyDetails, forKey: Key.showAPIKeyDetails)
         defaults.set(preferences.showMetricCards, forKey: Key.showMetricCards)
+        defaults.set(preferences.showSubscriptionQuota, forKey: Key.showSubscriptionQuota)
         defaults.set(preferences.showUsageHistory, forKey: Key.showUsageHistory)
         defaults.set(preferences.showDailyUsage, forKey: Key.showDailyUsage)
         defaults.set(preferences.automaticallyUpdates, forKey: Key.automaticallyUpdates)
@@ -127,6 +136,7 @@ enum AppDataMigration {
         "launchAtLogin",
         "showAPIKeyDetails",
         "showMetricCards",
+        "showSubscriptionQuota",
         "showUsageHistory",
         "showDailyUsage",
         "automaticallyUpdates",

@@ -161,6 +161,7 @@ enum SelfTest {
             launchAtLogin: true,
             showAPIKeyDetails: false,
             showMetricCards: false,
+            showSubscriptionQuota: false,
             showUsageHistory: false,
             showDailyUsage: false,
             automaticallyUpdates: false
@@ -168,6 +169,7 @@ enum SelfTest {
         require(preferences.launchAtLogin, "launch-at-login preference")
         require(!preferences.showAPIKeyDetails, "API key details preference")
         require(!preferences.showMetricCards, "metric cards preference")
+        require(!preferences.showSubscriptionQuota, "subscription quota preference")
         require(!preferences.showUsageHistory, "usage history preference")
         require(!preferences.showDailyUsage, "daily usage preference")
         require(!preferences.automaticallyUpdates, "automatic update preference")
@@ -180,6 +182,7 @@ enum SelfTest {
         require(initial.refreshInterval == 60, "refresh interval defaults to one minute")
         require(initial.showAPIKeyDetails, "API key details default enabled")
         require(initial.showMetricCards, "metric cards default enabled")
+        require(initial.showSubscriptionQuota, "subscription quota default enabled")
         require(initial.showUsageHistory, "usage history default enabled")
         require(initial.showDailyUsage, "daily usage default enabled")
         require(initial.automaticallyUpdates, "automatic updates default enabled")

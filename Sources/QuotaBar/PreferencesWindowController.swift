@@ -68,6 +68,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let launchAtLoginSwitch = NSSwitch()
     private let showAPIKeyDetailsSwitch = NSSwitch()
     private let showMetricCardsSwitch = NSSwitch()
+    private let showSubscriptionQuotaSwitch = NSSwitch()
     private let showUsageHistorySwitch = NSSwitch()
     private let showDailyUsageSwitch = NSSwitch()
     private let automaticallyUpdatesSwitch = NSSwitch()
@@ -184,6 +185,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         launchAtLoginSwitch.state = store.preferences.launchAtLogin ? .on : .off
         showAPIKeyDetailsSwitch.state = store.preferences.showAPIKeyDetails ? .on : .off
         showMetricCardsSwitch.state = store.preferences.showMetricCards ? .on : .off
+        showSubscriptionQuotaSwitch.state = store.preferences.showSubscriptionQuota ? .on : .off
         showUsageHistorySwitch.state = store.preferences.showUsageHistory ? .on : .off
         showDailyUsageSwitch.state = store.preferences.showDailyUsage ? .on : .off
         automaticallyUpdatesSwitch.state = store.preferences.automaticallyUpdates ? .on : .off
@@ -203,7 +205,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         subscriptionPopup.action = #selector(profileSelectionChanged)
         automaticallyResetsAPIKeyQuotaSwitch.target = self
         automaticallyResetsAPIKeyQuotaSwitch.action = #selector(profileSelectionChanged)
-        [launchAtLoginSwitch, showAPIKeyDetailsSwitch, showMetricCardsSwitch, showUsageHistorySwitch, showDailyUsageSwitch, automaticallyUpdatesSwitch].forEach {
+        [launchAtLoginSwitch, showAPIKeyDetailsSwitch, showMetricCardsSwitch, showSubscriptionQuotaSwitch, showUsageHistorySwitch, showDailyUsageSwitch, automaticallyUpdatesSwitch].forEach {
             $0.target = self
             $0.action = #selector(preferenceControlChanged)
         }
@@ -347,6 +349,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private func makeDisplayTab() -> NSView {
         displayRows = [
             settingsRow(title: "累计指标", control: showMetricCardsSwitch),
+            settingsRow(title: "订阅额度", control: showSubscriptionQuotaSwitch),
             settingsRow(title: "每日用量", control: showDailyUsageSwitch),
             settingsRow(title: "API Key 明细", control: showAPIKeyDetailsSwitch),
             settingsRow(title: "使用记录", control: showUsageHistorySwitch)
@@ -623,7 +626,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         updatePanelVisibility(
             rows: displayRows,
             separators: displaySeparators,
-            hiddenIndices: isSub2API ? [] : [0, 1]
+            hiddenIndices: isSub2API ? [] : [0, 2]
         )
     }
 
@@ -900,6 +903,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
                 launchAtLogin: launchAtLoginSwitch.state == .on,
                 showAPIKeyDetails: showAPIKeyDetailsSwitch.state == .on,
                 showMetricCards: showMetricCardsSwitch.state == .on,
+                showSubscriptionQuota: showSubscriptionQuotaSwitch.state == .on,
                 showUsageHistory: showUsageHistorySwitch.state == .on,
                 showDailyUsage: showDailyUsageSwitch.state == .on,
                 automaticallyUpdates: automaticallyUpdatesSwitch.state == .on

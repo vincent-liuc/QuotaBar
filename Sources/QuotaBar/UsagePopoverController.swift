@@ -285,28 +285,33 @@ private final class UsageContentView: NSView {
         sections.alignment = .leading
         sections.spacing = 0
 
-        if stationKind != .newAPI, preferences.showMetricCards, let accountMetrics = snapshot.accountMetrics {
-            sections.addArrangedSubview(makeMetricCards(accountMetrics))
-            sections.addArrangedSubview(sectionSeparator())
+        func appendSection(_ view: NSView) {
+            if !sections.arrangedSubviews.isEmpty {
+                sections.addArrangedSubview(sectionSeparator())
+            }
+            sections.addArrangedSubview(view)
         }
-        if snapshot.hasWeeklyUsage {
-            sections.addArrangedSubview(makeUsageRow(snapshot, stationKind: stationKind))
-        } else {
-            sections.addArrangedSubview(unavailableRow(
-                stationKind == .newAPI ? "当前站点没有设置限额令牌" : "当前站点没有可用的周订阅额度"
-            ))
+
+        if stationKind != .newAPI, preferences.showMetricCards, let accountMetrics = snapshot.accountMetrics {
+            appendSection(makeMetricCards(accountMetrics))
+        }
+        if preferences.showSubscriptionQuota {
+            if snapshot.hasWeeklyUsage {
+                appendSection(makeUsageRow(snapshot, stationKind: stationKind))
+            } else {
+                appendSection(unavailableRow(
+                    stationKind == .newAPI ? "当前站点没有设置限额令牌" : "当前站点没有可用的周订阅额度"
+                ))
+            }
         }
         if preferences.showDailyUsage, let dailyUsage = snapshot.dailyUsage {
-            sections.addArrangedSubview(sectionSeparator())
-            sections.addArrangedSubview(makeDailyUsageRow(dailyUsage))
+            appendSection(makeDailyUsageRow(dailyUsage))
         }
         if preferences.showAPIKeyDetails {
-            sections.addArrangedSubview(sectionSeparator())
-            sections.addArrangedSubview(makeKeyDetails(snapshot.keys))
+            appendSection(makeKeyDetails(snapshot.keys))
         }
         if preferences.showUsageHistory, let records = snapshot.usageRecords {
-            sections.addArrangedSubview(sectionSeparator())
-            sections.addArrangedSubview(makeUsageHistory(records, timezone: timezone))
+            appendSection(makeUsageHistory(records, timezone: timezone))
         }
         return panel(sections)
     }
@@ -603,11 +608,20 @@ private final class UsageContentView: NSView {
     }
 
     private func unavailableRow(_ message: String) -> NSView {
+        let container = NSView()
         let text = label(message, size: 11, color: .secondaryLabelColor)
         text.alignment = .center
-        text.widthAnchor.constraint(equalToConstant: 286).isActive = true
-        text.heightAnchor.constraint(equalToConstant: 54).isActive = true
-        return text
+        text.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(text)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: 286),
+            container.heightAnchor.constraint(equalToConstant: 54),
+            text.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            text.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            text.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 8),
+            text.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -8)
+        ])
+        return container
     }
 
     private func panel(_ content: NSView) -> NSView {
@@ -680,17 +694,26 @@ private final class UsageContentView: NSView {
     }
 
     private func makeLoadingView() -> NSView {
-        let indicator = NSProgressIndicator()
-        indicator.style = .spinning
-        indicator.controlSize = .small
-        indicator.startAnimation(nil)
+        let container = NSView()
+        let animation = LoadingCatAnimationView()
+        animation.translatesAutoresizingMaskIntoConstraints = false
         let text = label("正在读取用量", size: 12, color: .secondaryLabelColor)
-        let stack = NSStackView(views: [indicator, text])
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 28, left: 82, bottom: 28, right: 82)
-        return stack
+        text.alignment = .center
+        let stack = NSStackView(views: [animation, text])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 7
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(stack)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: 316),
+            container.heightAnchor.constraint(equalToConstant: 110),
+            animation.widthAnchor.constraint(equalToConstant: 88),
+            animation.heightAnchor.constraint(equalToConstant: 24),
+            stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+        return container
     }
 
     private func makeConfigurationGuide(_ progress: ConfigurationProgress) -> NSView {
@@ -1198,6 +1221,83 @@ private final class HairlineSeparatorView: NSView {
 
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+@MainActor
+private final class LoadingCatAnimationView: NSView {
+    private var animationTimer: Timer?
+    private var phase = 0.0
+
+    isolated deinit {
+        animationTimer?.invalidate()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            stopAnimating()
+        } else {
+            startAnimating()
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let progress = phase.truncatingRemainder(dividingBy: 1)
+        let catSize: CGFloat = 18
+        let travel = max(bounds.width - catSize, 0)
+        let catX = bounds.minX + travel * progress
+        let stride = sin(progress * .pi * 8)
+        let catY = bounds.midY - catSize / 2 + abs(stride) * 1.3
+        let edgeFade = min(min(progress / 0.08, (1 - progress) / 0.08), 1)
+
+        NSColor.secondaryLabelColor.withAlphaComponent(0.18 * edgeFade).setStroke()
+        for (offset, length) in [(CGFloat(-3), CGFloat(7)), (CGFloat(2), CGFloat(5))] {
+            let line = NSBezierPath()
+            line.move(to: NSPoint(x: max(catX - length - 4, bounds.minX), y: bounds.midY + offset))
+            line.line(to: NSPoint(x: max(catX - 4, bounds.minX), y: bounds.midY + offset))
+            line.lineWidth = 1
+            line.lineCapStyle = .round
+            line.stroke()
+        }
+
+        let cat = StatusRingRenderer.image(
+            progress: 0,
+            phase: .loading,
+            tailPhase: phase * .pi * 8
+        )
+        cat.draw(
+            in: NSRect(x: catX, y: catY, width: catSize, height: catSize),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: edgeFade,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
+    }
+
+    private func startAnimating() {
+        guard animationTimer == nil else { return }
+        let timer = Timer(timeInterval: 1 / 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.phase = (self.phase + 0.018).truncatingRemainder(dividingBy: 1)
+                self.needsDisplay = true
+            }
+        }
+        animationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopAnimating() {
+        animationTimer?.invalidate()
+        animationTimer = nil
+    }
 }
 
 private final class ThinQuotaProgressView: NSView {

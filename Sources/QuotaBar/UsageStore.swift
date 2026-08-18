@@ -237,6 +237,7 @@ final class UsageStore {
         launchAtLogin: Bool,
         showAPIKeyDetails: Bool,
         showMetricCards: Bool,
+        showSubscriptionQuota: Bool = true,
         showUsageHistory: Bool,
         showDailyUsage: Bool = true,
         automaticallyUpdates: Bool,
@@ -259,6 +260,7 @@ final class UsageStore {
             launchAtLogin: launchAtLogin,
             showAPIKeyDetails: showAPIKeyDetails,
             showMetricCards: showMetricCards,
+            showSubscriptionQuota: showSubscriptionQuota,
             showUsageHistory: showUsageHistory,
             showDailyUsage: showDailyUsage,
             automaticallyUpdates: automaticallyUpdates
