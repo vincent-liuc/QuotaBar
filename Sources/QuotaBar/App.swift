@@ -172,7 +172,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         refreshStatusIcon()
         statusItem.button?.setAccessibilityLabel(accessibilityLabel)
         if popover.isShown {
+            let shouldAnimatePopover = popover.animates
+            popover.animates = false
             contentController.refreshContent()
+            popover.animates = shouldAnimatePopover
         }
     }
 
