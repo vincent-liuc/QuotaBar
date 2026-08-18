@@ -934,12 +934,17 @@ private final class StationSwitcherControl: NSControl {
         displayName.draw(in: textRect, withAttributes: [.font: font, .foregroundColor: textColor])
 
         if isEnabled {
-            let chevron = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(pointSize: 8, weight: .semibold))
-            chevron?.isTemplate = true
-            let iconRect = NSRect(x: bounds.width - 18, y: (bounds.height - 10) / 2, width: 10, height: 10)
-            (isHovered ? NSColor.controlAccentColor : NSColor.secondaryLabelColor).set()
-            chevron?.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1)
+            let chevron = NSBezierPath()
+            let centerX = bounds.width - 13
+            let centerY = bounds.midY + 0.5
+            chevron.move(to: NSPoint(x: centerX - 3, y: centerY + 1.5))
+            chevron.line(to: NSPoint(x: centerX, y: centerY - 1.5))
+            chevron.line(to: NSPoint(x: centerX + 3, y: centerY + 1.5))
+            chevron.lineWidth = 1.1
+            chevron.lineCapStyle = .round
+            chevron.lineJoinStyle = .round
+            (isHovered ? NSColor.controlAccentColor : NSColor.secondaryLabelColor).setStroke()
+            chevron.stroke()
         }
     }
 
@@ -952,6 +957,7 @@ private final class StationSwitcherControl: NSControl {
                 self?.onSelect?(profileID)
             }
         )
+        menuPopover.appearance = effectiveAppearance
         menuPopover.contentViewController = controller
         menuPopover.behavior = .transient
         menuPopover.animates = true
@@ -995,7 +1001,7 @@ private final class StationSwitcherMenuViewController: NSViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func loadView() {
-        let root = StationSwitcherMenuView()
+        let root = StationSwitcherMenuView(frame: .zero)
         root.onSelect = onSelect
         root.configure(profiles: profiles, activeProfileID: activeProfileID)
         view = root
@@ -1004,13 +1010,25 @@ private final class StationSwitcherMenuViewController: NSViewController {
 }
 
 @MainActor
-private final class StationSwitcherMenuView: NSView {
+private final class StationSwitcherMenuView: NSVisualEffectView {
     var onSelect: ((UUID) -> Void)?
 
     private var rows: [StationSwitcherRow] = []
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        material = .popover
+        blendingMode = .withinWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.masksToBounds = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 214, height: CGFloat(max(rows.count, 1)) * 36 + 12)
+        NSSize(width: 180, height: CGFloat(max(rows.count, 1)) * 36 + 12)
     }
 
     func configure(profiles: [StationProfile], activeProfileID: UUID?) {
@@ -1034,16 +1052,6 @@ private final class StationSwitcherMenuView: NSView {
         }
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        let radius: CGFloat = 10
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius, yRadius: radius)
-        NSColor.controlBackgroundColor.withAlphaComponent(0.92).setFill()
-        path.fill()
-        path.lineWidth = 1
-        NSColor.separatorColor.withAlphaComponent(0.42).setStroke()
-        path.stroke()
-    }
 }
 
 @MainActor
