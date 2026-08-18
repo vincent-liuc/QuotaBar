@@ -155,6 +155,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     @objc private func togglePopover() {
         guard statusItem.button != nil else { return }
         if popover.isShown {
+            popover.animates = true
             popover.performClose(nil)
         } else {
             showPopover()
@@ -163,6 +164,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func showPopover() {
         guard let button = statusItem.button else { return }
+        popover.animates = true
         contentController.refreshContent()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -172,10 +174,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         refreshStatusIcon()
         statusItem.button?.setAccessibilityLabel(accessibilityLabel)
         if popover.isShown {
-            let shouldAnimatePopover = popover.animates
             popover.animates = false
             contentController.refreshContent()
-            popover.animates = shouldAnimatePopover
+            popover.contentSize = contentController.preferredContentSize
         }
     }
 

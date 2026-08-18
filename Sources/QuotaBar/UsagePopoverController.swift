@@ -74,6 +74,12 @@ final class UsagePopoverController: NSViewController {
         if bodyNeedsUpdate {
             let previousBody = bodyView
             let previousPhase = renderedPhase
+            let shouldPreserveScroll = renderedProfileID == store.activeProfileID
+                && renderedPhase == .ready
+                && store.phase == .ready
+            let previousScrollPositions = shouldPreserveScroll
+                ? scrollPositions(in: previousBody)
+                : [:]
             let windowTopEdge = view.window?.frame.maxY
             let retainedBodyHeight = stationSwitchBodyHeight
             let isRetainingStationSwitchHeight = retainedBodyHeight != nil && store.phase == .loading
@@ -122,6 +128,7 @@ final class UsagePopoverController: NSViewController {
             }
 
             nextBody.layoutSubtreeIfNeeded()
+            restoreScrollPositions(previousScrollPositions, in: nextBody)
             let bodyHeight = nextBody.fittingSize.height
             if isRetainingStationSwitchHeight, let retainedBodyHeight {
                 preferredContentSize = NSSize(width: 332, height: max(retainedBodyHeight + 32, 150))
@@ -143,6 +150,46 @@ final class UsagePopoverController: NSViewController {
         headerUpdatedLabel.stringValue = store.snapshot.map {
             "更新于 \(timeFormatter.string(from: $0.fetchedAt))"
         } ?? ""
+    }
+
+    private func scrollPositions(in root: NSView?) -> [String: NSPoint] {
+        guard let root else { return [:] }
+        var positions: [String: NSPoint] = [:]
+
+        func visit(_ view: NSView) {
+            if let scroll = view as? NSScrollView,
+               let identifier = scroll.identifier?.rawValue {
+                positions[identifier] = scroll.contentView.bounds.origin
+            }
+            view.subviews.forEach(visit)
+        }
+
+        visit(root)
+        return positions
+    }
+
+    private func restoreScrollPositions(_ positions: [String: NSPoint], in root: NSView) {
+        guard !positions.isEmpty else { return }
+
+        func visit(_ view: NSView) {
+            if let scroll = view as? NSScrollView,
+               let identifier = scroll.identifier?.rawValue,
+               let position = positions[identifier] {
+                scroll.layoutSubtreeIfNeeded()
+                let documentHeight = scroll.documentView?.bounds.height ?? 0
+                let viewportHeight = scroll.contentView.bounds.height
+                let maxY = max(0, documentHeight - viewportHeight)
+                let origin = NSPoint(
+                    x: position.x,
+                    y: min(max(position.y, 0), maxY)
+                )
+                scroll.contentView.setBoundsOrigin(origin)
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+            view.subviews.forEach(visit)
+        }
+
+        visit(root)
     }
 
     private func restorePopoverTopEdge(_ topEdge: CGFloat?, deferToNextRunLoop: Bool = true) {
@@ -524,6 +571,7 @@ private final class UsageContentView: NSView {
             ])
 
             let scroll = NSScrollView()
+            scroll.identifier = NSUserInterfaceItemIdentifier("api-key-details")
             scroll.drawsBackground = false
             scroll.borderType = .noBorder
             scroll.hasVerticalScroller = true
@@ -640,6 +688,7 @@ private final class UsageContentView: NSView {
                 document.widthAnchor.constraint(equalToConstant: 286)
             ])
             let scroll = NSScrollView()
+            scroll.identifier = NSUserInterfaceItemIdentifier("usage-history")
             scroll.drawsBackground = false
             scroll.borderType = .noBorder
             scroll.hasVerticalScroller = true
@@ -967,9 +1016,6 @@ private final class StationSwitcherControl: NSControl {
         updateAccessibility()
         invalidateIntrinsicContentSize()
         needsDisplay = true
-        if menuPopover.isShown {
-            menuPopover.performClose(nil)
-        }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -1031,10 +1077,11 @@ private final class StationSwitcherControl: NSControl {
         let availableWidth = bounds.width - (isEnabled ? 28 : 16)
         let displayName = truncatedName(name, font: font, maxWidth: availableWidth)
         let textSize = displayName.size(withAttributes: [.font: font])
+        let textWidth = min(textSize.width, availableWidth)
         let textRect = NSRect(
-            x: 9,
+            x: isEnabled ? 9 : (bounds.width - textWidth) / 2,
             y: (bounds.height - textSize.height) / 2 + 0.5,
-            width: min(textSize.width, availableWidth),
+            width: textWidth,
             height: textSize.height
         )
         displayName.draw(in: textRect, withAttributes: [.font: font, .foregroundColor: textColor])
