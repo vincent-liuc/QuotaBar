@@ -11,6 +11,11 @@ final class UsagePopoverController: NSViewController {
     private let stationSwitcher: StationSwitcherControl
     private var bodyView: NSView?
     private var stationSwitchBodyHeight: CGFloat?
+    private var renderedPhase: UsagePhase?
+    private var renderedProfileID: UUID?
+    private var renderedSnapshot: UsageSnapshot?
+    private var renderedPreferences: UserPreferences?
+    private var bodyTransitionID = 0
 
     init(store: UsageStore, showPreferences: @escaping (SettingsTab) -> Void) {
         self.store = store
@@ -60,24 +65,72 @@ final class UsagePopoverController: NSViewController {
 
     func refreshContent() {
         guard isViewLoaded else { return }
-        bodyView?.removeFromSuperview()
+        let bodyNeedsUpdate = bodyView == nil
+            || renderedPhase != store.phase
+            || renderedProfileID != store.activeProfileID
+            || renderedSnapshot != store.snapshot
+            || renderedPreferences != store.preferences
 
-        let retainedBodyHeight = stationSwitchBodyHeight
-        let isRetainingStationSwitchHeight = retainedBodyHeight != nil && store.phase == .loading
-        let nextBody = UsageContentView(
-            store: store,
-            showPreferences: showPreferences,
-            loadingHeight: isRetainingStationSwitchHeight ? retainedBodyHeight : nil
-        )
-        nextBody.translatesAutoresizingMaskIntoConstraints = false
-        bodyContainer.addSubview(nextBody)
-        NSLayoutConstraint.activate([
-            nextBody.topAnchor.constraint(equalTo: bodyContainer.topAnchor),
-            nextBody.leadingAnchor.constraint(equalTo: bodyContainer.leadingAnchor),
-            nextBody.trailingAnchor.constraint(equalTo: bodyContainer.trailingAnchor),
-            nextBody.bottomAnchor.constraint(equalTo: bodyContainer.bottomAnchor)
-        ])
-        bodyView = nextBody
+        if bodyNeedsUpdate {
+            let previousBody = bodyView
+            let previousPhase = renderedPhase
+            let windowTopEdge = view.window?.frame.maxY
+            let retainedBodyHeight = stationSwitchBodyHeight
+            let isRetainingStationSwitchHeight = retainedBodyHeight != nil && store.phase == .loading
+            let nextBody = UsageContentView(
+                store: store,
+                showPreferences: showPreferences,
+                loadingHeight: isRetainingStationSwitchHeight ? retainedBodyHeight : nil
+            )
+            nextBody.translatesAutoresizingMaskIntoConstraints = false
+            nextBody.alphaValue = previousBody != nil && (previousPhase == .loading || store.phase == .loading) ? 0 : 1
+            bodyContainer.subviews
+                .filter { $0 !== previousBody }
+                .forEach { $0.removeFromSuperview() }
+            bodyContainer.addSubview(nextBody)
+            NSLayoutConstraint.activate([
+                nextBody.topAnchor.constraint(equalTo: bodyContainer.topAnchor),
+                nextBody.leadingAnchor.constraint(equalTo: bodyContainer.leadingAnchor),
+                nextBody.trailingAnchor.constraint(equalTo: bodyContainer.trailingAnchor),
+                nextBody.bottomAnchor.constraint(equalTo: bodyContainer.bottomAnchor)
+            ])
+            bodyView = nextBody
+            renderedPhase = store.phase
+            renderedProfileID = store.activeProfileID
+            renderedSnapshot = store.snapshot
+            renderedPreferences = store.preferences
+
+            let shouldAnimateBody = previousBody != nil
+                && (previousPhase == .loading || store.phase == .loading)
+            bodyTransitionID += 1
+            let transitionID = bodyTransitionID
+            if shouldAnimateBody {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.2
+                    previousBody?.animator().alphaValue = 0
+                    nextBody.animator().alphaValue = 1
+                } completionHandler: { [weak self, weak previousBody, weak nextBody] in
+                    Task { @MainActor [weak self, weak previousBody, weak nextBody] in
+                        guard let self,
+                              self.bodyTransitionID == transitionID,
+                              self.bodyView === nextBody else { return }
+                        previousBody?.removeFromSuperview()
+                    }
+                }
+            } else {
+                previousBody?.removeFromSuperview()
+            }
+
+            nextBody.layoutSubtreeIfNeeded()
+            let bodyHeight = nextBody.fittingSize.height
+            if isRetainingStationSwitchHeight, let retainedBodyHeight {
+                preferredContentSize = NSSize(width: 332, height: max(retainedBodyHeight + 32, 150))
+            } else {
+                stationSwitchBodyHeight = nil
+                preferredContentSize = NSSize(width: 332, height: max(bodyHeight + 32, 150))
+            }
+            restorePopoverTopEdge(windowTopEdge)
+        }
 
         stationSwitcher.update(
             profiles: store.profiles,
@@ -90,13 +143,19 @@ final class UsagePopoverController: NSViewController {
         headerUpdatedLabel.stringValue = store.snapshot.map {
             "更新于 \(timeFormatter.string(from: $0.fetchedAt))"
         } ?? ""
-        nextBody.layoutSubtreeIfNeeded()
-        let bodyHeight = nextBody.fittingSize.height
-        if isRetainingStationSwitchHeight, let retainedBodyHeight {
-            preferredContentSize = NSSize(width: 332, height: max(retainedBodyHeight + 32, 150))
-        } else {
-            stationSwitchBodyHeight = nil
-            preferredContentSize = NSSize(width: 332, height: max(bodyHeight + 32, 150))
+    }
+
+    private func restorePopoverTopEdge(_ topEdge: CGFloat?, deferToNextRunLoop: Bool = true) {
+        guard let topEdge, let window = view.window, window.isVisible else { return }
+        var frame = window.frame
+        let delta = topEdge - frame.maxY
+        guard abs(delta) > 0.25 else { return }
+        frame.origin.y += delta
+        window.setFrameOrigin(frame.origin)
+        if deferToNextRunLoop {
+            DispatchQueue.main.async { [weak self] in
+                self?.restorePopoverTopEdge(topEdge, deferToNextRunLoop: false)
+            }
         }
     }
 
