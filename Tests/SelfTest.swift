@@ -476,6 +476,8 @@ enum SelfTest {
         let losAngelesRange = try UsageHistoryDateRange(timezone: "America/Los_Angeles", now: rangeNow)
         require(shanghaiRange.startDate == "2026-08-11" && shanghaiRange.endDate == "2026-08-12", "Shanghai local date range")
         require(losAngelesRange.startDate == "2026-08-10" && losAngelesRange.endDate == "2026-08-11", "Los Angeles local date range")
+        let image2Range = try Image2UsageDateRange(timezone: "Asia/Shanghai", now: rangeNow)
+        require(image2Range.startDate == "2026-01-01" && image2Range.endDate == "2026-08-12", "Image2 usage date range")
 
         let suiteName = "dev.ruobin.QuotaBar.StationSelfTest.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -848,6 +850,18 @@ enum SelfTest {
                     json: #"{"code":0,"message":"success","data":{"total_tokens":137630389,"total_actual_cost":106.38925756}}"#
                 )
             }
+            if url.path.hasSuffix("/api/v1/usage/dashboard/models") {
+                let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                func query(_ name: String) -> String? { items.first(where: { $0.name == name })?.value }
+                require(query("start_date") == "2026-01-01", "Image2 usage starts on 2026-01-01")
+                require(query("end_date") != nil, "Image2 usage ends today")
+                require(query("model_source") == "requested", "Image2 usage uses requested model source")
+                require(query("timezone") == "Asia/Shanghai", "Image2 usage uses station timezone")
+                return mockResponse(
+                    url: url,
+                    json: #"{"code":0,"message":"success","data":{"start_date":"2026-01-01","end_date":"2026-08-27","models":[{"model":"gpt-image-2","requests":121},{"model":"gpt-5.6","requests":42}]}}"#
+                )
+            }
             if url.path.hasSuffix("/api/v1/usage/dashboard/api-keys-usage") {
                 guard request.httpMethod == "POST" else {
                     throw APIClientError.invalidResponse
@@ -929,6 +943,7 @@ enum SelfTest {
         require(usage.dailyUsage?.subscriptionName == "Weekly", "daily usage uses selected subscription")
         require(usage.accountMetrics?.totalTokens == 137_630_389, "total tokens decoded")
         require(usage.accountMetrics?.totalActualCost == 106.38925756, "total actual cost decoded")
+        require(usage.accountMetrics?.image2RequestCount == 121, "Image2 request count decoded")
         require(usage.capabilities.contains(.apiKeyDailyUsage), "daily usage capability detected")
         require(usage.capabilities.contains(.usageHistory), "usage history capability detected")
         require(usage.usageRecords?.count == 12, "all fetched usage history retained in data layer")

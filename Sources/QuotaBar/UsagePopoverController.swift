@@ -473,32 +473,47 @@ private final class UsageContentView: NSView {
     }
 
     private func makeMetricCards(_ metrics: AccountMetrics) -> NSView {
-        let tokens = metricCard(
-            title: metrics.tokensPeriod == .today ? "今日 Token" : "累计 Token",
-            value: compactTokenCount(metrics.totalTokens),
-            symbolName: "sum",
-            tint: .systemIndigo
-        )
-        let cost = metricCard(
-            title: metrics.balance == nil ? "累计消费" : "历史消耗",
-            value: currency(metrics.totalActualCost),
-            symbolName: "dollarsign.circle.fill",
-            tint: .systemGreen
-        )
-        var cards = [tokens, cost]
+        var items: [(title: String, value: String, symbolName: String, tint: NSColor)] = [
+            (
+                metrics.tokensPeriod == .today ? "今日 Token" : "累计 Token",
+                compactTokenCount(metrics.totalTokens),
+                "sum",
+                .systemIndigo
+            ),
+            (
+                metrics.balance == nil ? "累计消费" : "历史消耗",
+                currency(metrics.totalActualCost),
+                "dollarsign.circle.fill",
+                .systemGreen
+            )
+        ]
         if let balance = metrics.balance {
-            cards.insert(metricCard(title: "账户余额", value: currency(balance), symbolName: "wallet.pass.fill", tint: .systemOrange), at: 0)
+            items.insert(("账户余额", currency(balance), "wallet.pass.fill", .systemOrange), at: 0)
         }
         if let requestCount = metrics.requestCount {
-            cards.append(metricCard(title: "请求次数", value: String(requestCount), symbolName: "arrow.up.right", tint: .systemBlue))
+            items.append(("请求次数", String(requestCount), "arrow.up.right", .systemBlue))
         }
-        let rows = stride(from: 0, to: cards.count, by: 2).map { start -> NSView in
-            let rowCards = Array(cards[start..<min(start + 2, cards.count)])
+        if let image2RequestCount = metrics.image2RequestCount {
+            items.append(("image2用量", "\(image2RequestCount) 次", "photo.stack.fill", .systemPink))
+        }
+        let usesThreeColumnRow = items.count == 3
+        let columns = usesThreeColumnRow ? 3 : 2
+        let cards = items.map {
+            metricCard(
+                title: $0.title,
+                value: $0.value,
+                symbolName: $0.symbolName,
+                tint: $0.tint,
+                compact: usesThreeColumnRow
+            )
+        }
+        let rows = stride(from: 0, to: cards.count, by: columns).map { start -> NSView in
+            let rowCards = Array(cards[start..<min(start + columns, cards.count)])
             let row = NSStackView(views: rowCards)
             row.orientation = .horizontal
             row.alignment = .centerY
             row.distribution = .fillEqually
-            row.spacing = 10
+            row.spacing = usesThreeColumnRow ? 4 : 10
             row.widthAnchor.constraint(equalToConstant: 286).isActive = true
             return row
         }
@@ -509,27 +524,35 @@ private final class UsageContentView: NSView {
         return stack
     }
 
-    private func metricCard(title: String, value: String, symbolName: String, tint: NSColor) -> NSView {
-        let icon = NSImageView(image: symbol(symbolName, pointSize: 13))
+    private func metricCard(
+        title: String,
+        value: String,
+        symbolName: String,
+        tint: NSColor,
+        compact: Bool = false
+    ) -> NSView {
+        let iconSize: CGFloat = compact ? 14 : 18
+        let icon = NSImageView(image: symbol(symbolName, pointSize: compact ? 11 : 13))
         icon.contentTintColor = tint
         icon.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 18),
-            icon.heightAnchor.constraint(equalToConstant: 18)
+            icon.widthAnchor.constraint(equalToConstant: iconSize),
+            icon.heightAnchor.constraint(equalToConstant: iconSize)
         ])
 
-        let titleLabel = label(title, size: 10, color: .secondaryLabelColor)
-        let valueLabel = label(value, size: 15, weight: .semibold)
-        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        let titleLabel = label(title, size: compact ? 9 : 10, color: .secondaryLabelColor)
+        let valueSize: CGFloat = compact ? 13 : 15
+        let valueLabel = label(value, size: valueSize, weight: .semibold)
+        valueLabel.font = NSFont.monospacedDigitSystemFont(ofSize: valueSize, weight: .semibold)
         let text = NSStackView(views: [titleLabel, valueLabel])
         text.orientation = .vertical
         text.alignment = .leading
-        text.spacing = 3
+        text.spacing = compact ? 2 : 3
 
         let content = NSStackView(views: [icon, text])
         content.orientation = .horizontal
         content.alignment = .centerY
-        content.spacing = 9
+        content.spacing = compact ? 4 : 9
         return metricTile(content)
     }
 

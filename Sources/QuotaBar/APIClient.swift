@@ -452,9 +452,40 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
     }
 
     private func fetchAccountMetrics(profile: StationProfile, token: String) async throws -> AccountMetrics {
+        async let stats = fetchDashboardStats(profile: profile, token: token)
+        async let image2RequestCount = optional {
+            try await self.fetchImage2RequestCount(profile: profile, token: token)
+        }
+        let result = try await stats
+        return AccountMetrics(
+            totalTokens: max(result.totalTokens, 0),
+            totalActualCost: max(result.totalActualCost, 0),
+            image2RequestCount: await image2RequestCount
+        )
+    }
+
+    private func fetchDashboardStats(profile: StationProfile, token: String) async throws -> DashboardStats {
         let request = authenticatedRequest(URLRequest(url: try endpoint(profile, "usage/dashboard/stats")), token: token)
         let envelope: APIEnvelope<DashboardStats> = try await send(request)
-        return AccountMetrics(totalTokens: max(envelope.data.totalTokens, 0), totalActualCost: max(envelope.data.totalActualCost, 0))
+        return envelope.data
+    }
+
+    private func fetchImage2RequestCount(profile: StationProfile, token: String) async throws -> Int {
+        let range = try Image2UsageDateRange(timezone: profile.timezone)
+        var components = URLComponents(
+            url: try endpoint(profile, "usage/dashboard/models"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "start_date", value: range.startDate),
+            URLQueryItem(name: "end_date", value: range.endDate),
+            URLQueryItem(name: "model_source", value: "requested"),
+            URLQueryItem(name: "timezone", value: profile.timezone)
+        ]
+        let request = authenticatedRequest(URLRequest(url: components.url!), token: token)
+        let envelope: APIEnvelope<DashboardModelUsageData> = try await send(request)
+        let requests = envelope.data.models.first { $0.model == "gpt-image-2" }?.requests ?? 0
+        return max(requests, 0)
     }
 
     private func fetchUsageHistory(profile: StationProfile, token: String) async throws -> [UsageRecord] {
@@ -778,6 +809,21 @@ struct UsageHistoryDateRange: Equatable, Sendable {
         formatter.timeZone = timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         startDate = formatter.string(from: yesterday)
+        endDate = formatter.string(from: now)
+    }
+}
+
+struct Image2UsageDateRange: Equatable, Sendable {
+    let startDate = "2026-01-01"
+    let endDate: String
+
+    init(timezone: String, now: Date = Date()) throws {
+        guard let timeZone = TimeZone(identifier: timezone) else { throw StationProfileError.invalidTimezone }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
         endDate = formatter.string(from: now)
     }
 }

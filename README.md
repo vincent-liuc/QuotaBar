@@ -27,7 +27,7 @@
 - 设置内支持立即更新：下载最新 universal DMG、校验 SHA-256、自动替换应用并重新启动
 - 默认每天本地时间 12:00 自动检查并安装更新，可在“设置 → 更新”中关闭自动更新
 - 更新下载通过 GitHub Asset API 获取，并为慢速网络保留最长 10 分钟下载时间与断线重试
-- 当前版本：1.11.20
+- 当前版本：1.11.21
 - 提供独立偏好设置窗口
 
 ## 数据来源与隐私
@@ -42,6 +42,7 @@
 - `/api/v1/keys`：API Key 名称、启用状态和当前并发
 - `PUT /api/v1/keys/{id}`：仅在站点开启周期重置联动且检测到新周期时，以 `reset_quota` 清零 API Key 已用额度
 - `/api/v1/usage/dashboard/stats`：累计 Token 和累计实际消费金额
+- `/api/v1/usage/dashboard/models`：从 2026-01-01 至今的 `gpt-image-2` 请求次数
 - `/api/v1/usage/dashboard/api-keys-usage`：启用 API Key 的当日实际用量
 - `/api/v1/usage`：API Key、模型、推理强度、实际费用和时间
 

@@ -248,6 +248,15 @@ struct DashboardStats: Decodable, Sendable {
     }
 }
 
+struct DashboardModelUsageData: Decodable, Sendable {
+    let models: [DashboardModelUsage]
+}
+
+struct DashboardModelUsage: Decodable, Sendable {
+    let model: String
+    let requests: Int
+}
+
 struct SubscriptionGroup: Decodable, Sendable {
     let weeklyLimitUSD: Double?
     let dailyLimitUSD: Double?
@@ -346,6 +355,7 @@ struct AccountMetrics: Equatable, Sendable {
     let totalActualCost: Double
     let balance: Double?
     let requestCount: Int?
+    let image2RequestCount: Int?
     let tokensPeriod: MetricTokensPeriod
 
     init(
@@ -353,12 +363,14 @@ struct AccountMetrics: Equatable, Sendable {
         totalActualCost: Double,
         balance: Double? = nil,
         requestCount: Int? = nil,
+        image2RequestCount: Int? = nil,
         tokensPeriod: MetricTokensPeriod = .lifetime
     ) {
         self.totalTokens = totalTokens
         self.totalActualCost = totalActualCost
         self.balance = balance
         self.requestCount = requestCount
+        self.image2RequestCount = image2RequestCount
         self.tokensPeriod = tokensPeriod
     }
 }
