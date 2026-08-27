@@ -494,7 +494,7 @@ private final class UsageContentView: NSView {
             items.append(("请求次数", String(requestCount), "arrow.up.right", .systemBlue))
         }
         if let image2RequestCount = metrics.image2RequestCount {
-            items.append(("image2用量", "\(image2RequestCount) 次", "photo.stack.fill", .systemPink))
+            items.append(("image2", "\(image2RequestCount) 次", "photo.stack.fill", .systemPink))
         }
         let usesThreeColumnRow = items.count == 3
         let columns = usesThreeColumnRow ? 3 : 2
