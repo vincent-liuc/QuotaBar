@@ -8,6 +8,7 @@ enum SelfTest {
         try testDecodesSub2APIUsageKeyGroup()
         try testDecodesUsageHistory()
         try testSubscriptionAggregation()
+        testSubscriptionCountdownFormatting()
         try await testAggregatedSubscriptionAPI()
         try await testAggregatedSubscriptionDisplay()
         try testSettingsWithoutSubscriptionSelection()
@@ -34,7 +35,7 @@ enum SelfTest {
         testWeeklyResetMonitor()
         try await testFinalWeekResetAndRetry()
         try testCredentialFileStorage()
-        print("Self-test passed: 30 checks")
+        print("Self-test passed: 31 checks")
     }
 
     private static func testSubscriptionAggregation() throws {
@@ -58,6 +59,11 @@ enum SelfTest {
         let snapshot = UsageSnapshot(weeklyUsage: weekly, keys: [])
         require(snapshot.remaining == 525 && snapshot.progress == 0.3, "aggregate progress uses weighted totals")
         require(weekly.resetAt == ISO8601DateFormatter().date(from: "2026-09-12T02:00:00Z"), "aggregate next reset is the earliest individual reset")
+        require(weekly.subscriptionResets.map(\.name) == ["First", "Second"], "each subscription retains its name")
+        require(weekly.subscriptionResets.map(\.resetAt) == [
+            ISO8601DateFormatter().date(from: "2026-09-14T02:00:00Z"),
+            ISO8601DateFormatter().date(from: "2026-09-12T02:00:00Z")
+        ], "aggregation retains distinct subscription countdowns")
         require(summary.dailyUsage?.total == 50 && summary.dailyUsage?.used == 10, "daily usage aggregates independently")
         require(summary.dailyUsage?.subscriptionCount == 2 && summary.dailyUsage?.subscriptionID == nil, "daily aggregate count")
 
@@ -71,7 +77,7 @@ enum SelfTest {
 
         let mixedJSON = #"""
         [
-          {"id":10,"status":"active","weekly_limit_usd":100,"weekly_usage_usd":120},
+          {"id":10,"status":"active","weekly_limit_usd":100,"weekly_usage_usd":120,"name":"  ","group":{"name":"Group name"}},
           {"id":11,"status":"active","weekly_limit_usd":100,"weekly_usage_usd":10},
           {"id":12,"status":"active","daily_limit_usd":30,"daily_usage_usd":5},
           {"id":13,"status":"active"}
@@ -83,6 +89,20 @@ enum SelfTest {
         require(mixedSummary.weeklyUsage?.remaining == 90, "overage on one subscription does not consume another subscription's remaining quota")
         require(mixedSummary.weeklyUsage?.resetAt == nil, "missing reset windows do not fabricate countdowns")
         require(mixedSummary.dailyUsage?.total == 30 && mixedSummary.dailyUsage?.subscriptionID == 12, "daily-only subscription included in daily totals")
+        require(mixedSummary.weeklyUsage?.subscriptionResets.map(\.name) == ["Group name", "订阅 #11"], "group name and ID fallbacks identify unnamed subscriptions")
+    }
+
+    private static func testSubscriptionCountdownFormatting() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        func info(reset: TimeInterval?, expiry: TimeInterval?) -> SubscriptionResetInfo {
+            SubscriptionResetInfo(subscriptionID: 1, name: "Name", resetAt: reset.map { now.addingTimeInterval($0) }, expiresAt: expiry.map { now.addingTimeInterval($0) })
+        }
+        require(subscriptionCountdownTitle(info(reset: 2 * 86_400 + 3_600, expiry: nil), now: now) == "2天1小时后重置", "weekly reset countdown")
+        require(subscriptionCountdownTitle(info(reset: nil, expiry: 2 * 86_400 + 3_600), now: now) == "2天1小时后到期", "final week shows expiry rather than a nonexistent reset")
+        require(subscriptionCountdownTitle(info(reset: 45, expiry: nil), now: now) == "不足1分钟后重置", "sub-minute countdown")
+        require(subscriptionCountdownTitle(info(reset: 0, expiry: nil), now: now) == "等待重置", "elapsed reset is not shown as another future minute")
+        require(subscriptionCountdownTitle(info(reset: nil, expiry: -1), now: now) == "已到期", "elapsed expiry")
+        require(subscriptionCountdownTitle(info(reset: nil, expiry: nil), now: now) == "重置时间未知", "unknown time is not left blank")
     }
 
     private static func testAggregatedSubscriptionAPI() async throws {
@@ -217,7 +237,11 @@ enum SelfTest {
             await client.setUsage(UsageData(
                 weeklyUsage: WeeklyUsage(
                     used: 225, total: 750, resetAt: Date().addingTimeInterval(86_400 + offset),
-                    subscriptionCount: 2
+                    subscriptionCount: 2,
+                    subscriptionResets: [
+                        SubscriptionResetInfo(subscriptionID: 1, name: "标准订阅", resetAt: Date().addingTimeInterval(2 * 86_400 + 3_600), expiresAt: nil),
+                        SubscriptionResetInfo(subscriptionID: 2, name: "扩展订阅", resetAt: Date().addingTimeInterval(5 * 86_400 + 7_200), expiresAt: nil)
+                    ]
                 ),
                 dailyUsage: DailyUsage(used: 10, total: 50, subscriptionCount: 2),
                 accountMetrics: AccountMetrics(totalTokens: 2_300_000_000, totalActualCost: 2089.43, image2RequestCount: 456),
@@ -247,11 +271,70 @@ enum SelfTest {
         let countLabel = fields.first { $0.stringValue == "2 个订阅" }!
         require(countLabel.toolTip?.contains("最近一次订阅重置") == true, "aggregate tooltip distinguishes the next individual reset")
         require(countLabel.intrinsicContentSize.width <= countLabel.bounds.width, "subscription count fits the ring caption")
+        require(fields.contains { $0.stringValue == "标准订阅" } && fields.contains { $0.stringValue == "扩展订阅" }, "multiple subscriptions display their names")
+        let countdowns = fields.filter { $0.identifier?.rawValue.hasPrefix("subscription-countdown-") == true }
+        require(countdowns.count == 2, "each subscription has an on-screen countdown")
+        require(countdowns[0].stringValue.hasPrefix("2天") && countdowns[1].stringValue.hasPrefix("5天"), "different reset dates produce different visible countdowns")
+        for field in countdowns {
+            require(field.intrinsicContentSize.width <= field.bounds.width, "countdown text fits its stable column")
+        }
         if let output = ProcessInfo.processInfo.environment["QUOTABAR_UI_TEST_OUTPUT"],
            let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
             view.cacheDisplay(in: view.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: output))
         }
+
+        for finalWeek in [false, true] {
+            let deadline = Date().addingTimeInterval(6 * 86_400 + 3_600)
+            await client.setUsage(UsageData(
+                weeklyUsage: WeeklyUsage(used: 25, total: 500, resetAt: finalWeek ? nil : deadline, subscriptionResets: [
+                    SubscriptionResetInfo(subscriptionID: 1, name: "Single name must be hidden", resetAt: finalWeek ? nil : deadline, expiresAt: finalWeek ? deadline : nil)
+                ]),
+                dailyUsage: nil, accountMetrics: nil, keys: [], usageRecords: [], capabilities: [.subscriptions]
+            ))
+            await store.refresh()
+            controller.refreshContent()
+            window.setContentSize(controller.preferredContentSize)
+            view.layoutSubtreeIfNeeded()
+            let singleFields = labels(in: view)
+            require(!singleFields.contains { $0.identifier?.rawValue.hasPrefix("subscription-name-") == true }, "single subscription hides its name")
+            require(!singleFields.contains { $0.stringValue.contains("Single name") }, "single subscription name never leaks into labels")
+            let singleCountdown = singleFields.first { $0.identifier?.rawValue == "subscription-countdown-0" }!
+            require(singleCountdown.stringValue.hasSuffix(finalWeek ? "后到期" : "后重置"), "single subscription shows the correct countdown type")
+            require(singleCountdown.intrinsicContentSize.width <= singleCountdown.bounds.width, "single countdown fits without truncation")
+            if let output = ProcessInfo.processInfo.environment["QUOTABAR_UI_TEST_OUTPUT"],
+               let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                let url = URL(fileURLWithPath: output).deletingLastPathComponent().appendingPathComponent("subscription-countdown-\(finalWeek ? "expiry" : "single").png")
+                try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+            }
+        }
+        let many = (1...8).map { index in
+            SubscriptionResetInfo(subscriptionID: index, name: "同名的较长订阅名称", resetAt: Date().addingTimeInterval(Double(index) * 86_400 + 3_600), expiresAt: nil)
+        }
+        await client.setUsage(UsageData(
+            weeklyUsage: WeeklyUsage(used: 25, total: 500, subscriptionCount: many.count, subscriptionResets: many),
+            dailyUsage: nil, accountMetrics: nil, keys: [], usageRecords: [], capabilities: [.subscriptions]
+        ))
+        await store.refresh()
+        controller.refreshContent()
+        window.setContentSize(controller.preferredContentSize)
+        view.layoutSubtreeIfNeeded()
+        func views(in root: NSView) -> [NSView] { [root] + root.subviews.flatMap { views(in: $0) } }
+        let allViews = views(in: view)
+        let scroll = allViews.compactMap { $0 as? NSScrollView }.first { $0.identifier?.rawValue == "subscription-countdowns" }!
+        require(scroll.bounds.height == 68 && scroll.documentView!.bounds.height > scroll.bounds.height, "many subscriptions use a bounded scroll area")
+        let manyFields = labels(in: view)
+        require(manyFields.filter { $0.identifier?.rawValue.hasPrefix("subscription-countdown-") == true }.count == 8, "all countdowns remain accessible")
+        let names = manyFields.filter { $0.identifier?.rawValue.hasPrefix("subscription-name-") == true }
+        require(Set(names.map(\.stringValue)).count == 8, "duplicate subscription names are distinguished by ID")
+        require(names.allSatisfy { $0.toolTip == $0.stringValue }, "truncated long names retain full tooltips")
+        scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: 24))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        await store.refresh()
+        controller.refreshContent()
+        let refreshedScroll = views(in: view).compactMap { $0 as? NSScrollView }.first { $0.identifier?.rawValue == "subscription-countdowns" }!
+        require(refreshedScroll.contentView.bounds.origin.y == 24, "refresh preserves countdown scroll position")
         window.contentViewController = nil
     }
 
@@ -688,6 +771,7 @@ enum SelfTest {
         require(calls == 0, "upgrade establishes a server-window baseline without replaying legacy countdown state")
         let finalWeek = try usage(start: newStart)
         require(finalWeek.weeklyUsage?.resetAt == nil && finalWeek.weeklyUsage?.windowStart == newStart, "last week keeps the actual reset event even without a future countdown")
+        require(finalWeek.weeklyUsage?.subscriptionResets.first?.countdownDate == expiry, "final week retains an accurately labelled expiry countdown")
         await client.setUsage(finalWeek)
         await client.failNextResets(1)
         await store.refresh()

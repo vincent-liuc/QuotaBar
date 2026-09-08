@@ -14,16 +14,27 @@ struct SubscriptionUsageSummary: Equatable, Sendable {
         }
         let weekly = selected.compactMap { subscription -> WeeklyUsage? in
             guard let total = subscription.weeklyLimitUSD else { return nil }
+            let resetAt = WeeklyResetCalculator.nextReset(
+                windowStart: subscription.weeklyWindowStart,
+                expiresAt: subscription.expiresAt,
+                now: now
+            )
+            let name = [subscription.name, subscription.group?.name]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .first { !$0.isEmpty }
+                ?? subscription.id.map { "订阅 #\($0)" } ?? "未命名订阅"
             return WeeklyUsage(
                 subscriptionID: subscription.id,
                 used: max(subscription.weeklyUsageUSD ?? 0, 0),
                 total: max(total, 0),
-                resetAt: WeeklyResetCalculator.nextReset(
-                    windowStart: subscription.weeklyWindowStart,
-                    expiresAt: subscription.expiresAt,
-                    now: now
-                ),
-                windowStart: subscription.weeklyWindowStart
+                resetAt: resetAt,
+                windowStart: subscription.weeklyWindowStart,
+                subscriptionResets: [SubscriptionResetInfo(
+                    subscriptionID: subscription.id,
+                    name: name,
+                    resetAt: resetAt,
+                    expiresAt: subscription.expiresAt
+                )]
             )
         }
         if weekly.count > 1 {
@@ -33,7 +44,8 @@ struct SubscriptionUsageSummary: Equatable, Sendable {
                 // This is the next individual reset, not a shared reset for all subscriptions.
                 resetAt: weekly.compactMap(\.resetAt).min(),
                 subscriptionCount: weekly.count,
-                remaining: weekly.reduce(0) { $0 + $1.remaining }
+                remaining: weekly.reduce(0) { $0 + $1.remaining },
+                subscriptionResets: weekly.flatMap(\.subscriptionResets)
             )
         } else {
             weeklyUsage = weekly.first

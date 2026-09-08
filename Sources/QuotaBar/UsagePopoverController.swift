@@ -15,6 +15,7 @@ final class UsagePopoverController: NSViewController {
     private var renderedProfileID: UUID?
     private var renderedSnapshot: UsageSnapshot?
     private var renderedPreferences: UserPreferences?
+    private var renderedCountdownMinute: Int?
     private var bodyTransitionID = 0
 
     init(store: UsageStore, showPreferences: @escaping (SettingsTab) -> Void) {
@@ -65,11 +66,13 @@ final class UsagePopoverController: NSViewController {
 
     func refreshContent() {
         guard isViewLoaded else { return }
+        let countdownMinute = Int(Date().timeIntervalSince1970 / 60)
         let bodyNeedsUpdate = bodyView == nil
             || renderedPhase != store.phase
             || renderedProfileID != store.activeProfileID
             || renderedSnapshot != store.snapshot
             || renderedPreferences != store.preferences
+            || (store.snapshot?.weeklyUsage != nil && renderedCountdownMinute != countdownMinute)
 
         if bodyNeedsUpdate {
             let previousBody = bodyView
@@ -105,6 +108,7 @@ final class UsagePopoverController: NSViewController {
             renderedProfileID = store.activeProfileID
             renderedSnapshot = store.snapshot
             renderedPreferences = store.preferences
+            renderedCountdownMinute = countdownMinute
 
             let shouldAnimateBody = previousBody != nil
                 && (previousPhase == .loading || store.phase == .loading)
@@ -341,7 +345,8 @@ private final class UsageContentView: NSView {
         ])
         let quotaKind = snapshot.weeklyUsage?.kind ?? .weekly
         var ringViews: [NSView] = [ring]
-        if !(stationKind == .newAPI && quotaKind == .accountPool) {
+        if !(stationKind == .newAPI && quotaKind == .accountPool)
+            && (quotaKind != .weekly || (snapshot.weeklyUsage?.subscriptionCount ?? 0) > 1) {
             let resetTitle: String
             switch quotaKind {
             case .accountPool:
@@ -349,11 +354,7 @@ private final class UsageContentView: NSView {
             case .tokenPool:
                 resetTitle = "限额令牌汇总"
             case .weekly:
-                if let weeklyUsage = snapshot.weeklyUsage, weeklyUsage.subscriptionCount > 1 {
-                    resetTitle = "\(weeklyUsage.subscriptionCount) 个订阅"
-                } else {
-                    resetTitle = weeklyResetTitle(snapshot.weeklyUsage?.resetAt)
-                }
+                resetTitle = "\(snapshot.weeklyUsage?.subscriptionCount ?? 0) 个订阅"
             }
             let reset = label(resetTitle, size: 9, color: .tertiaryLabelColor)
             reset.alignment = .center
@@ -397,7 +398,85 @@ private final class UsageContentView: NSView {
         row.alignment = .centerY
         row.spacing = 13
         row.widthAnchor.constraint(equalToConstant: 286).isActive = true
-        return row
+        guard quotaKind == .weekly, let usage = snapshot.weeklyUsage else { return row }
+        let section = NSStackView(views: [row, makeSubscriptionCountdowns(usage)])
+        section.orientation = .vertical
+        section.alignment = .leading
+        section.spacing = 8
+        section.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        return section
+    }
+
+    private func makeSubscriptionCountdowns(_ usage: WeeklyUsage) -> NSView {
+        let resets = usage.subscriptionResets.isEmpty
+            ? [SubscriptionResetInfo(subscriptionID: usage.subscriptionID, name: "", resetAt: usage.resetAt, expiresAt: nil)]
+            : usage.subscriptionResets
+        let showsNames = usage.subscriptionCount > 1
+        let needsScroll = resets.count > 3
+        let width: CGFloat = needsScroll ? 270 : 286
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for (index, reset) in resets.enumerated() {
+            let countdown = label(subscriptionCountdownTitle(reset), size: 10, color: .secondaryLabelColor)
+            countdown.identifier = NSUserInterfaceItemIdentifier("subscription-countdown-\(index)")
+            countdown.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+            countdown.alignment = showsNames ? .right : .center
+            countdown.toolTip = reset.countdownDate.map {
+                "\(reset.isExpiryCountdown ? "订阅到期" : "下次周额度重置")：\(resetDateFormatter.string(from: $0))"
+            }
+            var views: [NSView] = [countdown]
+            if showsNames {
+                let duplicateName = resets.filter { $0.name == reset.name }.count > 1
+                let name = duplicateName
+                    ? "\(reset.name) #\(reset.subscriptionID ?? index + 1)"
+                    : reset.name
+                let title = label(name, size: 10)
+                title.identifier = NSUserInterfaceItemIdentifier("subscription-name-\(index)")
+                title.toolTip = name
+                title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                countdown.widthAnchor.constraint(equalToConstant: 138).isActive = true
+                title.widthAnchor.constraint(equalToConstant: width - 146).isActive = true
+                views.insert(title, at: 0)
+            } else {
+                countdown.widthAnchor.constraint(equalToConstant: width).isActive = true
+            }
+            let row = NSStackView(views: views)
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 8
+            NSLayoutConstraint.activate([
+                row.widthAnchor.constraint(equalToConstant: width),
+                row.heightAnchor.constraint(equalToConstant: 20)
+            ])
+            stack.addArrangedSubview(row)
+        }
+        guard needsScroll else { return stack }
+        let document = FlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: document.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
+            document.widthAnchor.constraint(equalToConstant: width)
+        ])
+        let scroll = NSScrollView()
+        scroll.identifier = NSUserInterfaceItemIdentifier("subscription-countdowns")
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.documentView = document
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scroll.widthAnchor.constraint(equalToConstant: 286),
+            scroll.heightAnchor.constraint(equalToConstant: 68)
+        ])
+        return scroll
     }
 
     private func metricRow(_ title: String, value: Double, emphasized: Bool) -> NSView {
@@ -1632,15 +1711,18 @@ private func usageDate(_ date: Date, timezone: String) -> String {
     return formatter.string(from: date)
 }
 
-private func weeklyResetTitle(_ resetAt: Date?, now: Date = Date()) -> String {
-    guard let resetAt else { return "" }
-    let remaining = max(Int(resetAt.timeIntervalSince(now)), 0)
+func subscriptionCountdownTitle(_ reset: SubscriptionResetInfo, now: Date = Date()) -> String {
+    guard let deadline = reset.countdownDate else { return "重置时间未知" }
+    let remaining = Int(ceil(deadline.timeIntervalSince(now)))
+    guard remaining > 0 else { return reset.isExpiryCountdown ? "已到期" : "等待重置" }
+    let action = reset.isExpiryCountdown ? "到期" : "重置"
     let days = remaining / 86_400
     let hours = (remaining % 86_400) / 3_600
-    if days > 0 { return "\(days)天\(hours)小时后重置" }
-    let minutes = max((remaining % 3_600) / 60, 1)
-    if hours > 0 { return "\(hours)小时\(minutes)分钟后重置" }
-    return "\(minutes)分钟后重置"
+    if days > 0 { return "\(days)天\(hours)小时后\(action)" }
+    let minutes = (remaining % 3_600) / 60
+    if hours > 0 { return "\(hours)小时\(minutes)分钟后\(action)" }
+    if minutes > 0 { return "\(minutes)分钟后\(action)" }
+    return "不足1分钟后\(action)"
 }
 
 private let resetDateFormatter: DateFormatter = {

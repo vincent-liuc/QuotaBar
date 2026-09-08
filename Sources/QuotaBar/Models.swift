@@ -258,10 +258,12 @@ struct DashboardModelUsage: Decodable, Sendable {
 }
 
 struct SubscriptionGroup: Decodable, Sendable {
+    let name: String?
     let weeklyLimitUSD: Double?
     let dailyLimitUSD: Double?
 
     enum CodingKeys: String, CodingKey {
+        case name
         case weeklyLimitUSD = "weekly_limit_usd"
         case dailyLimitUSD = "daily_limit_usd"
     }
@@ -295,6 +297,16 @@ struct SubscriptionRecord: Decodable, Sendable {
     var dailyLimitUSD: Double? { directDailyLimitUSD ?? group?.dailyLimitUSD }
 }
 
+struct SubscriptionResetInfo: Equatable, Sendable {
+    let subscriptionID: Int?
+    let name: String
+    let resetAt: Date?
+    let expiresAt: Date?
+
+    var countdownDate: Date? { resetAt ?? expiresAt }
+    var isExpiryCountdown: Bool { resetAt == nil && expiresAt != nil }
+}
+
 struct WeeklyUsage: Equatable, Sendable {
     let kind: QuotaUsageKind
     let subscriptionID: Int?
@@ -304,6 +316,7 @@ struct WeeklyUsage: Equatable, Sendable {
     let windowStart: Date?
     let subscriptionCount: Int
     let remaining: Double
+    let subscriptionResets: [SubscriptionResetInfo]
 
     init(
         kind: QuotaUsageKind = .weekly,
@@ -313,7 +326,8 @@ struct WeeklyUsage: Equatable, Sendable {
         resetAt: Date? = nil,
         subscriptionCount: Int = 1,
         remaining: Double? = nil,
-        windowStart: Date? = nil
+        windowStart: Date? = nil,
+        subscriptionResets: [SubscriptionResetInfo] = []
     ) {
         self.kind = kind
         self.subscriptionID = subscriptionID
@@ -323,6 +337,7 @@ struct WeeklyUsage: Equatable, Sendable {
         self.windowStart = windowStart
         self.subscriptionCount = subscriptionCount
         self.remaining = remaining ?? max(total - used, 0)
+        self.subscriptionResets = subscriptionResets
     }
 }
 
