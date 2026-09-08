@@ -196,7 +196,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             stationKindPopup.addItem(withTitle: kind.displayName)
             stationKindPopup.lastItem?.representedObject = kind
         }
-        subscriptionPopup.addItem(withTitle: "自动选择")
+        subscriptionPopup.addItem(withTitle: "全部有效订阅（汇总）")
         stationKindPopup.target = self
         stationKindPopup.action = #selector(stationKindChanged)
         timezonePopup.target = self
@@ -590,7 +590,7 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             subscriptionPopup.selectItem(at: 0)
             return
         }
-        subscriptionPopup.addItem(withTitle: "自动选择")
+        subscriptionPopup.addItem(withTitle: "全部有效订阅（汇总）")
         for option in subscriptions {
             subscriptionPopup.addItem(withTitle: "\(option.name)\(option.status == "active" ? "" : "（已停用）")")
             subscriptionPopup.lastItem?.representedObject = option.id

@@ -15,6 +15,7 @@ swiftc \
   -parse-as-library \
   "$project_dir/Sources/QuotaBar/StationProfile.swift" \
   "$project_dir/Sources/QuotaBar/Models.swift" \
+  "$project_dir/Sources/QuotaBar/SubscriptionUsageSummary.swift" \
   "$project_dir/Sources/QuotaBar/AppPreferences.swift" \
   "$project_dir/Sources/QuotaBar/APIClient.swift" \
   "$project_dir/Sources/QuotaBar/AppUpdater.swift" \
@@ -23,6 +24,7 @@ swiftc \
   "$project_dir/Sources/QuotaBar/CredentialStore.swift" \
   "$project_dir/Sources/QuotaBar/LaunchAtLoginManager.swift" \
   "$project_dir/Sources/QuotaBar/UsageStore.swift" \
+  "$project_dir/Sources/QuotaBar/UsagePopoverController.swift" \
   "$project_dir/Sources/QuotaBar/StatusRingRenderer.swift" \
   "$project_dir/Tests/SelfTest.swift" \
   -o "$test_binary"

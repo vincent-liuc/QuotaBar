@@ -301,19 +301,25 @@ struct WeeklyUsage: Equatable, Sendable {
     let used: Double
     let total: Double
     let resetAt: Date?
+    let subscriptionCount: Int
+    let remaining: Double
 
     init(
         kind: QuotaUsageKind = .weekly,
         subscriptionID: Int? = nil,
         used: Double,
         total: Double,
-        resetAt: Date? = nil
+        resetAt: Date? = nil,
+        subscriptionCount: Int = 1,
+        remaining: Double? = nil
     ) {
         self.kind = kind
         self.subscriptionID = subscriptionID
         self.used = used
         self.total = total
         self.resetAt = resetAt
+        self.subscriptionCount = subscriptionCount
+        self.remaining = remaining ?? max(total - used, 0)
     }
 }
 
@@ -323,19 +329,22 @@ struct DailyUsage: Equatable, Sendable {
     let used: Double
     let total: Double
     let resetAt: Date?
+    let subscriptionCount: Int
 
     init(
         subscriptionID: Int? = nil,
         subscriptionName: String? = nil,
         used: Double,
         total: Double,
-        resetAt: Date? = nil
+        resetAt: Date? = nil,
+        subscriptionCount: Int = 1
     ) {
         self.subscriptionID = subscriptionID
         self.subscriptionName = subscriptionName
         self.used = used
         self.total = total
         self.resetAt = resetAt
+        self.subscriptionCount = subscriptionCount
     }
 
     var progress: Double {
@@ -482,7 +491,7 @@ struct UsageSnapshot: Equatable, Sendable {
 
     var serverUpdatedAt: Date? { keys.compactMap(\.updatedAt).max() }
 
-    var remaining: Double { max(total - used, 0) }
+    var remaining: Double { weeklyUsage?.remaining ?? max(total - used, 0) }
 
     var progress: Double {
         guard total > 0 else { return 0 }

@@ -29,11 +29,13 @@ final class WeeklyResetMonitor: @unchecked Sendable {
         subscriptionID: Int?,
         resetAt: Date?,
         enabled: Bool,
-        visibleKeyIDs: [Int]
+        visibleKeyIDs: [Int],
+        subscriptionCount: Int = 1
     ) -> [Int] {
         lock.withLock {
             let profileKey = profileID.uuidString
-            guard enabled else {
+            // A reset of one subscription must not clear keys belonging to the others.
+            guard enabled, subscriptionCount == 1 else {
                 removeObservationUnlocked(for: profileID)
                 return []
             }

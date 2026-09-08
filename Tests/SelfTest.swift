@@ -7,6 +7,9 @@ enum SelfTest {
         try testDecodesUsageResponse()
         try testDecodesSub2APIUsageKeyGroup()
         try testDecodesUsageHistory()
+        try testSubscriptionAggregation()
+        try await testAggregatedSubscriptionAPI()
+        try await testAggregatedSubscriptionDisplay()
         testWeeklyUsageAndProgress()
         testPreferenceNormalization()
         try testStationProfiles()
@@ -29,7 +32,156 @@ enum SelfTest {
         testWeeklyResetCalculation()
         testWeeklyResetMonitor()
         try testCredentialFileStorage()
-        print("Self-test passed: 24 checks")
+        print("Self-test passed: 28 checks")
+    }
+
+    private static func testSubscriptionAggregation() throws {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
+        let now = ISO8601DateFormatter().date(from: "2026-09-08T02:00:00Z")!
+        let json = #"""
+        [
+          {"id":1,"status":"active","name":"First","weekly_usage_usd":100,"daily_usage_usd":3,"weekly_window_start":"2026-09-07T02:00:00Z","daily_window_start":"2026-09-08T00:00:00Z","expires_at":"2026-10-01T00:00:00Z","group":{"weekly_limit_usd":500,"daily_limit_usd":20}},
+          {"id":2,"status":"active","name":"Second","weekly_usage_usd":125,"daily_usage_usd":7,"weekly_limit_usd":250,"daily_limit_usd":30,"weekly_window_start":"2026-09-05T02:00:00Z","daily_window_start":"2026-09-07T16:00:00Z","group":{"weekly_limit_usd":999,"daily_limit_usd":999}},
+          {"id":3,"status":"expired","weekly_usage_usd":1000,"weekly_limit_usd":5000},
+          {"id":4,"status":"active","weekly_usage_usd":1000,"weekly_limit_usd":5000,"expires_at":"2026-09-08T02:00:00Z"},
+          {"id":5,"status":"disabled","weekly_usage_usd":1000,"weekly_limit_usd":5000}
+        ]
+        """#
+        let records = try decoder.decode([SubscriptionRecord].self, from: Data(json.utf8))
+        let summary = SubscriptionUsageSummary(subscriptions: records + [records[0]], selection: .automatic, now: now)
+        let weekly = summary.weeklyUsage!
+        require(weekly.total == 750 && weekly.used == 225, "active subscriptions sum limits and usage, excluding expired and duplicate IDs")
+        require(weekly.subscriptionID == nil && weekly.subscriptionCount == 2, "aggregate retains count without pretending to be one subscription")
+        let snapshot = UsageSnapshot(weeklyUsage: weekly, keys: [])
+        require(snapshot.remaining == 525 && snapshot.progress == 0.3, "aggregate progress uses weighted totals")
+        require(weekly.resetAt == ISO8601DateFormatter().date(from: "2026-09-12T02:00:00Z"), "aggregate next reset is the earliest individual reset")
+        require(summary.dailyUsage?.total == 50 && summary.dailyUsage?.used == 10, "daily usage aggregates independently")
+        require(summary.dailyUsage?.subscriptionCount == 2 && summary.dailyUsage?.subscriptionID == nil, "daily aggregate count")
+
+        let manual = SubscriptionUsageSummary(subscriptions: records, selection: .manual(2), now: now)
+        require(manual.weeklyUsage?.total == 250 && manual.weeklyUsage?.subscriptionID == 2, "manual selection remains a single subscription")
+        require(manual.dailyUsage?.subscriptionName == "Second" && manual.dailyUsage?.subscriptionCount == 1, "manual daily subscription name preserved")
+        for id in [3, 4, 5, 99] {
+            let invalid = SubscriptionUsageSummary(subscriptions: records, selection: .manual(id), now: now)
+            require(invalid.weeklyUsage == nil && invalid.dailyUsage == nil, "inactive, expired and missing manual subscriptions stay unavailable")
+        }
+        let empty = SubscriptionUsageSummary(subscriptions: Array(records[2...]), selection: .automatic, now: now)
+        require(empty.weeklyUsage == nil && empty.dailyUsage == nil, "automatic mode never falls back to expired subscriptions")
+
+        let mixedJSON = #"""
+        [
+          {"id":10,"status":"active","weekly_limit_usd":100,"weekly_usage_usd":120},
+          {"id":11,"status":"active","weekly_limit_usd":100,"weekly_usage_usd":10},
+          {"id":12,"status":"active","daily_limit_usd":30,"daily_usage_usd":5},
+          {"id":13,"status":"active"}
+        ]
+        """#
+        let mixed = try decoder.decode([SubscriptionRecord].self, from: Data(mixedJSON.utf8))
+        let mixedSummary = SubscriptionUsageSummary(subscriptions: mixed, selection: .automatic, now: now)
+        require(mixedSummary.weeklyUsage?.total == 200 && mixedSummary.weeklyUsage?.subscriptionCount == 2, "daily-only and unbounded records do not create weekly limits")
+        require(mixedSummary.weeklyUsage?.remaining == 90, "overage on one subscription does not consume another subscription's remaining quota")
+        require(mixedSummary.weeklyUsage?.resetAt == nil, "missing reset windows do not fabricate countdowns")
+        require(mixedSummary.dailyUsage?.total == 30 && mixedSummary.dailyUsage?.subscriptionID == 12, "daily-only subscription included in daily totals")
+    }
+
+    private static func testAggregatedSubscriptionAPI() async throws {
+        MockURLProtocol.requestHandler = { request in
+            let url = try requireURL(request)
+            switch url.path {
+            case "/api/v1/auth/login":
+                return mockResponse(url: url, json: #"{"code":0,"message":"success","data":{"access_token":"test-token"}}"#)
+            case "/api/v1/keys":
+                return mockResponse(url: url, json: #"{"code":0,"message":"success","data":{"items":[],"total":0}}"#)
+            case "/api/v1/subscriptions":
+                return mockResponse(url: url, json: #"{"code":0,"message":"success","data":[{"id":1,"status":"active","weekly_limit_usd":500,"weekly_usage_usd":100,"daily_limit_usd":20,"daily_usage_usd":3},{"id":2,"status":"active","weekly_limit_usd":250,"weekly_usage_usd":125,"daily_limit_usd":30,"daily_usage_usd":7}]}"#)
+            default:
+                return mockResponse(url: url, json: #"{"code":404,"message":"unsupported","data":{}}"#, status: 404)
+            }
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let client = APIClient(session: URLSession(configuration: configuration))
+        let usage = try await client.fetchUsage(
+            profile: StationProfile(name: "Aggregate", serviceURL: "https://aggregate.example.com"),
+            credentials: Credentials(email: "test@example.com", password: "test")
+        )
+        require(usage.weeklyUsage?.total == 750 && usage.weeklyUsage?.used == 225, "automatic API path publishes all subscriptions")
+        require(usage.dailyUsage?.total == 50 && usage.dailyUsage?.used == 10, "automatic API path publishes daily aggregate")
+    }
+
+    @MainActor
+    private static func testAggregatedSubscriptionDisplay() async throws {
+        _ = NSApplication.shared
+        let suiteName = "dev.ruobin.QuotaBar.AggregateUITest.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let profile = StationProfile(
+            name: "Subscriptions",
+            serviceURL: "https://aggregate.example.com",
+            automaticallyResetsAPIKeyQuota: true,
+            lastCheckedAt: Date(),
+            lastAuthenticatedAt: Date()
+        )
+        let profiles = StationProfileStore(defaults: defaults)
+        try profiles.save(StationProfilesState(profiles: [profile], activeProfileID: profile.id))
+        let credentials = CredentialStore(baseDirectory: directory)
+        try credentials.save(Credentials(email: "test@example.com", password: "test"), for: profile.id)
+        let client = OnboardingUsageClient()
+        let store = UsageStore(
+            client: client,
+            credentialStore: credentials,
+            profileStore: profiles,
+            preferencesStore: PreferencesStore(defaults: defaults),
+            launchAtLoginManager: TestLaunchAtLoginManager(),
+            weeklyResetMonitor: WeeklyResetMonitor(defaults: defaults),
+            startsPolling: false
+        )
+        for offset in [0.0, 86_400.0] {
+            await client.setUsage(UsageData(
+                weeklyUsage: WeeklyUsage(
+                    used: 225, total: 750, resetAt: Date().addingTimeInterval(86_400 + offset),
+                    subscriptionCount: 2
+                ),
+                dailyUsage: DailyUsage(used: 10, total: 50, subscriptionCount: 2),
+                accountMetrics: AccountMetrics(totalTokens: 2_300_000_000, totalActualCost: 2089.43, image2RequestCount: 456),
+                keys: [usageKey(id: 1, total: 300, used: 50, today: 5)],
+                usageRecords: [],
+                capabilities: [.subscriptions, .accountMetrics]
+            ))
+            await store.refresh()
+        }
+        let resetCalls = await client.resetCallCount
+        require(resetCalls == 0, "store never resets API keys when aggregate countdown advances")
+        require(store.snapshot?.remaining == 525, "store publishes aggregate remaining quota")
+
+        let controller = UsagePopoverController(store: store, showPreferences: { _ in })
+        let view = controller.view
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 332, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentViewController = controller
+        window.setContentSize(controller.preferredContentSize)
+        view.layoutSubtreeIfNeeded()
+        func labels(in root: NSView) -> [NSTextField] {
+            (root as? NSTextField).map { [$0] } ?? root.subviews.flatMap { labels(in: $0) }
+        }
+        let fields = labels(in: view)
+        for value in ["2 个订阅", "每日用量（2 个订阅）", "$750.00", "$225.00", "$525.00"] {
+            require(fields.contains { $0.stringValue == value }, "aggregate UI renders \(value)")
+        }
+        let countLabel = fields.first { $0.stringValue == "2 个订阅" }!
+        require(countLabel.toolTip?.contains("最近一次订阅重置") == true, "aggregate tooltip distinguishes the next individual reset")
+        require(countLabel.intrinsicContentSize.width <= countLabel.bounds.width, "subscription count fits the ring caption")
+        if let output = ProcessInfo.processInfo.environment["QUOTABAR_UI_TEST_OUTPUT"],
+           let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: output))
+        }
+        window.contentViewController = nil
     }
 
     private static func testDecodesUsageHistory() throws {
@@ -386,6 +538,27 @@ enum SelfTest {
                 enabled: true, visibleKeyIDs: [105, 106]
             ).isEmpty,
             "subscription change establishes a new baseline"
+        )
+        require(
+            monitor.resetPlan(
+                profileID: profileID, subscriptionID: nil, resetAt: nextCycle,
+                enabled: true, visibleKeyIDs: [105, 106], subscriptionCount: 2
+            ).isEmpty,
+            "multi-subscription mode disables whole-account quota resets"
+        )
+        require(
+            monitor.resetPlan(
+                profileID: profileID, subscriptionID: nil, resetAt: nextCycle.addingTimeInterval(86_400),
+                enabled: true, visibleKeyIDs: [105, 106], subscriptionCount: 2
+            ).isEmpty,
+            "advancing an individual reset in an aggregate never resets all keys"
+        )
+        require(
+            monitor.resetPlan(
+                profileID: profileID, subscriptionID: 11, resetAt: nextCycle.addingTimeInterval(7 * 86_400),
+                enabled: true, visibleKeyIDs: [105, 106]
+            ).isEmpty,
+            "returning from aggregate mode starts a new single-subscription baseline"
         )
     }
 
@@ -841,7 +1014,7 @@ enum SelfTest {
                 }
                 return mockResponse(
                     url: url,
-                    json: #"{"code":0,"message":"success","data":[{"id":10,"name":"Weekly","status":"active","weekly_usage_usd":52.71,"daily_usage_usd":6.25,"daily_window_start":"2026-08-17T09:37:50+08:00","weekly_window_start":"2026-08-11T09:37:50+08:00","expires_at":"2026-09-14T13:42:26+08:00","group":{"weekly_limit_usd":500,"daily_limit_usd":20}}]}"#
+                    json: #"{"code":0,"message":"success","data":[{"id":10,"name":"Weekly","status":"active","weekly_usage_usd":52.71,"daily_usage_usd":6.25,"daily_window_start":"2026-08-17T09:37:50+08:00","weekly_window_start":"2026-08-11T09:37:50+08:00","expires_at":"2099-09-14T13:42:26+08:00","group":{"weekly_limit_usd":500,"daily_limit_usd":20}}]}"#
                 )
             }
             if url.path.hasSuffix("/api/v1/usage/dashboard/stats") {
@@ -1126,6 +1299,12 @@ private final class LockedStrings: @unchecked Sendable {
 private actor OnboardingUsageClient: UsageFetching {
     private var fetchError: APIClientError?
     private var stationError: APIClientError?
+    private var usageOverride: UsageData?
+    private(set) var resetCallCount = 0
+
+    func setUsage(_ usage: UsageData) {
+        usageOverride = usage
+    }
 
     func setFetchError(_ error: APIClientError?) {
         fetchError = error
@@ -1137,6 +1316,7 @@ private actor OnboardingUsageClient: UsageFetching {
 
     func fetchUsage(profile: StationProfile, credentials: Credentials) async throws -> UsageData {
         if let fetchError { throw fetchError }
+        if let usageOverride { return usageOverride }
         return UsageData(
             weeklyUsage: WeeklyUsage(used: 1, total: 10),
             dailyUsage: nil,
@@ -1151,7 +1331,9 @@ private actor OnboardingUsageClient: UsageFetching {
         profile: StationProfile,
         credentials: Credentials,
         keyID: Int
-    ) async throws {}
+    ) async throws {
+        resetCallCount += 1
+    }
 
     func testStation(profile: StationProfile) async throws {
         if let stationError { throw stationError }

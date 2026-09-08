@@ -358,7 +358,8 @@ final class UsageStore {
                     subscriptionID: weeklyUsage.subscriptionID,
                     resetAt: weeklyUsage.resetAt,
                     enabled: profile.automaticallyResetsAPIKeyQuota,
-                    visibleKeyIDs: usage.keys.filter(\.isVisible).map(\.id)
+                    visibleKeyIDs: usage.keys.filter(\.isVisible).map(\.id),
+                    subscriptionCount: weeklyUsage.subscriptionCount
                 )
                 var resetSucceeded = false
                 var resetFailed = false

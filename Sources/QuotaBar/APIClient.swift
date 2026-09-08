@@ -184,11 +184,11 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         let metricsResult = await accountMetrics
         let usageResult = await todayUsage
         let historyResult = await usageHistory
-        let selectedSubscription = subscriptionResult.flatMap {
-            selectSubscription($0, selection: profile.subscriptionSelection)
+        let subscriptionUsage = subscriptionResult.map {
+            SubscriptionUsageSummary(subscriptions: $0, selection: profile.subscriptionSelection)
         }
-        let weeklyUsage = selectedSubscription.flatMap(makeWeeklyUsage)
-        let dailyUsage = selectedSubscription.flatMap(makeDailyUsage)
+        let weeklyUsage = subscriptionUsage?.weeklyUsage
+        let dailyUsage = subscriptionUsage?.dailyUsage
         let keysWithUsage = keys.map { key in
             var updated = key
             updated.todayActualCost = usageResult.map { $0[key.id] ?? 0 }
@@ -278,50 +278,6 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
 
     private func optional<T: Sendable>(_ operation: () async throws -> T) async -> T? {
         do { return try await operation() } catch { return nil }
-    }
-
-    private func selectSubscription(
-        _ subscriptions: [SubscriptionRecord],
-        selection: SubscriptionSelection
-    ) -> SubscriptionRecord? {
-        switch selection {
-        case .automatic:
-            let active = subscriptions.filter { $0.status == "active" }
-            return active.first(where: { $0.weeklyLimitUSD != nil })
-                ?? active.first
-                ?? subscriptions.first(where: { $0.weeklyLimitUSD != nil })
-                ?? subscriptions.first
-        case .manual(let id):
-            return subscriptions.first { $0.id == id && $0.status == "active" }
-        }
-    }
-
-    private func makeWeeklyUsage(_ subscription: SubscriptionRecord) -> WeeklyUsage? {
-        guard let total = subscription.weeklyLimitUSD else { return nil }
-        return WeeklyUsage(
-            kind: .weekly,
-            subscriptionID: subscription.id,
-            used: max(subscription.weeklyUsageUSD ?? 0, 0),
-            total: max(total, 0),
-            resetAt: WeeklyResetCalculator.nextReset(
-                windowStart: subscription.weeklyWindowStart,
-                expiresAt: subscription.expiresAt
-            )
-        )
-    }
-
-    private func makeDailyUsage(_ subscription: SubscriptionRecord) -> DailyUsage? {
-        guard let total = subscription.dailyLimitUSD else { return nil }
-        return DailyUsage(
-            subscriptionID: subscription.id,
-            subscriptionName: subscription.name,
-            used: max(subscription.dailyUsageUSD ?? 0, 0),
-            total: max(total, 0),
-            resetAt: DailyResetCalculator.nextReset(
-                windowStart: subscription.dailyWindowStart,
-                expiresAt: subscription.expiresAt
-            )
-        )
     }
 
     private func validSession(profile: StationProfile, credentials: Credentials) async throws -> AuthenticatedSession {

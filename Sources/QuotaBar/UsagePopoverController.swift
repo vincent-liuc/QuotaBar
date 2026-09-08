@@ -349,12 +349,23 @@ private final class UsageContentView: NSView {
             case .tokenPool:
                 resetTitle = "限额令牌汇总"
             case .weekly:
-                resetTitle = weeklyResetTitle(snapshot.weeklyUsage?.resetAt)
+                if let weeklyUsage = snapshot.weeklyUsage, weeklyUsage.subscriptionCount > 1 {
+                    resetTitle = "\(weeklyUsage.subscriptionCount) 个订阅"
+                } else {
+                    resetTitle = weeklyResetTitle(snapshot.weeklyUsage?.resetAt)
+                }
             }
             let reset = label(resetTitle, size: 9, color: .tertiaryLabelColor)
             reset.alignment = .center
             reset.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
             reset.toolTip = snapshot.weeklyUsage?.resetAt.map { "下次周额度重置：\(resetDateFormatter.string(from: $0))" }
+            if let weeklyUsage = snapshot.weeklyUsage, weeklyUsage.subscriptionCount > 1 {
+                var tooltip = "各订阅按各自周期重置；汇总时不自动清零 API Key 用量"
+                if let nextReset = weeklyUsage.resetAt {
+                    tooltip += "\n最近一次订阅重置：\(resetDateFormatter.string(from: nextReset))"
+                }
+                reset.toolTip = tooltip
+            }
             reset.widthAnchor.constraint(equalToConstant: 82).isActive = true
             ringViews.append(reset)
         }
@@ -447,7 +458,11 @@ private final class UsageContentView: NSView {
     }
 
     private func makeDailyUsageRow(_ usage: DailyUsage) -> NSView {
-        let title = label("每日用量", size: 11, weight: .semibold)
+        let title = label(
+            usage.subscriptionCount > 1 ? "每日用量（\(usage.subscriptionCount) 个订阅）" : "每日用量",
+            size: 11,
+            weight: .semibold
+        )
         let progress = ThinQuotaProgressView(progress: usage.progress)
         progress.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
