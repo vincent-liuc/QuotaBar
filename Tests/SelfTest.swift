@@ -11,6 +11,7 @@ enum SelfTest {
         testSubscriptionCountdownFormatting()
         try await testAggregatedSubscriptionAPI()
         try await testAggregatedSubscriptionDisplay()
+        try await testCompactKeyDisplay()
         try testSettingsWithoutSubscriptionSelection()
         testWeeklyUsageAndProgress()
         testPreferenceNormalization()
@@ -35,7 +36,7 @@ enum SelfTest {
         testWeeklyResetMonitor()
         try await testFinalWeekResetAndRetry()
         try testCredentialFileStorage()
-        print("Self-test passed: 31 checks")
+        print("Self-test passed: 32 checks")
     }
 
     private static func testSubscriptionAggregation() throws {
@@ -302,6 +303,12 @@ enum SelfTest {
             let singleCountdown = singleFields.first { $0.identifier?.rawValue == "subscription-countdown-0" }!
             require(singleCountdown.stringValue.hasSuffix(finalWeek ? "后到期" : "后重置"), "single subscription shows the correct countdown type")
             require(singleCountdown.intrinsicContentSize.width <= singleCountdown.bounds.width, "single countdown fits without truncation")
+            let section = views(in: view).first { $0.identifier?.rawValue == "subscription-quota" } as! NSStackView
+            require(section.spacing == 4, "countdown top spacing is compact")
+            require(singleCountdown.superview!.bounds.height == 16, "countdown row does not add excess vertical padding")
+            let sections = section.superview as! NSStackView
+            let sectionIndex = sections.arrangedSubviews.firstIndex(of: section)!
+            require(sections.arrangedSubviews[sectionIndex + 1].bounds.height == 9, "countdown bottom separator uses matching compact padding")
             if let output = ProcessInfo.processInfo.environment["QUOTABAR_UI_TEST_OUTPUT"],
                let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                 view.cacheDisplay(in: view.bounds, to: bitmap)
@@ -323,7 +330,7 @@ enum SelfTest {
         func views(in root: NSView) -> [NSView] { [root] + root.subviews.flatMap { views(in: $0) } }
         let allViews = views(in: view)
         let scroll = allViews.compactMap { $0 as? NSScrollView }.first { $0.identifier?.rawValue == "subscription-countdowns" }!
-        require(scroll.bounds.height == 68 && scroll.documentView!.bounds.height > scroll.bounds.height, "many subscriptions use a bounded scroll area")
+        require(scroll.bounds.height == 52 && scroll.documentView!.bounds.height > scroll.bounds.height, "many subscriptions use a compact bounded scroll area")
         let manyFields = labels(in: view)
         require(manyFields.filter { $0.identifier?.rawValue.hasPrefix("subscription-countdown-") == true }.count == 8, "all countdowns remain accessible")
         let names = manyFields.filter { $0.identifier?.rawValue.hasPrefix("subscription-name-") == true }
@@ -336,6 +343,157 @@ enum SelfTest {
         let refreshedScroll = views(in: view).compactMap { $0 as? NSScrollView }.first { $0.identifier?.rawValue == "subscription-countdowns" }!
         require(refreshedScroll.contentView.bounds.origin.y == 24, "refresh preserves countdown scroll position")
         window.contentViewController = nil
+    }
+
+    @MainActor
+    private static func testCompactKeyDisplay() async throws {
+        _ = NSApplication.shared
+        let suiteName = "dev.ruobin.QuotaBar.KeyGridUITest.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let profile = StationProfile(name: "QuotaBar", serviceURL: "https://key-grid.example.com", lastCheckedAt: Date(), lastAuthenticatedAt: Date())
+        let profiles = StationProfileStore(defaults: defaults)
+        try profiles.save(StationProfilesState(profiles: [profile], activeProfileID: profile.id))
+        let credentials = CredentialStore(baseDirectory: directory)
+        try credentials.save(Credentials(email: "test@example.com", password: "test"), for: profile.id)
+        let client = OnboardingUsageClient()
+        let store = UsageStore(
+            client: client,
+            credentialStore: credentials,
+            profileStore: profiles,
+            preferencesStore: PreferencesStore(defaults: defaults),
+            launchAtLoginManager: TestLaunchAtLoginManager(),
+            weeklyResetMonitor: WeeklyResetMonitor(defaults: defaults),
+            startsPolling: false
+        )
+        func data(keys: [UsageKey]) -> UsageData {
+            UsageData(
+                weeklyUsage: WeeklyUsage(used: 125, total: 500, subscriptionResets: [
+                    SubscriptionResetInfo(subscriptionID: 1, name: "Hidden single subscription", resetAt: nil, expiresAt: Date().addingTimeInterval(2 * 86_400 + 3_600))
+                ]),
+                dailyUsage: DailyUsage(used: 16.5, total: 50),
+                accountMetrics: AccountMetrics(totalTokens: 2_300_000_000, totalActualCost: 2089.43, image2RequestCount: 456),
+                keys: keys,
+                usageRecords: [],
+                capabilities: [.subscriptions, .accountMetrics, .apiKeyDailyUsage]
+            )
+        }
+        func descendants(of root: NSView) -> [NSView] {
+            [root] + root.subviews.flatMap { descendants(of: $0) }
+        }
+        let controller = UsagePopoverController(store: store, showPreferences: { _ in })
+        let view = controller.view
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 332, height: 600), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentViewController = controller
+        defer { window.contentViewController = nil }
+        let cases = [(0, true), (1, true), (2, true), (3, true), (4, true), (5, true), (9, true), (8, false), (9, false)]
+        for (count, hasQuota) in cases {
+            var keys = (0..<count).map { index in
+                let names = ["工作台", "图像服务", "自动化", "开发环境", "备用"]
+                return UsageKey(
+                    id: index + 1,
+                    name: index < names.count ? names[index] : "Long API Key name that must not overlap the adjacent column \(index)",
+                    status: "active",
+                    quota: hasQuota && !(count == 3 && index == 1) ? (index == 6 ? 123456789.12 : 300) : 0,
+                    quotaUsed: index == 6 ? 12345678.90 : 50,
+                    updatedAt: nil,
+                    group: index == 6 ? "Very long group name" : "Default",
+                    currentConcurrency: index == 0 ? 2 : 0,
+                    todayActualCost: index == 7 ? nil : (index == 6 ? 1234567.89 : Double(count - index) * 1.25)
+                )
+            }
+            await client.setUsage(data(keys: keys))
+            await store.refresh()
+            controller.refreshContent()
+            window.setContentSize(controller.preferredContentSize)
+            view.layoutSubtreeIfNeeded()
+            let allViews = descendants(of: view)
+            let grid = allViews.first { $0.identifier?.rawValue == "api-key-grid" } as! NSStackView
+            let rows = grid.arrangedSubviews.compactMap { $0 as? NSStackView }
+            require(rows.count == (count + 1) / 2, "API keys use two columns with one final partial row")
+            let items = rows.flatMap(\.arrangedSubviews).filter { $0.identifier?.rawValue.hasPrefix("api-key-item-") == true }
+            let sortedKeys = store.snapshot!.keys
+            require(items.map { $0.identifier!.rawValue } == sortedKeys.map { "api-key-item-\($0.id)" }, "grid preserves daily-usage sorting")
+            for row in rows {
+                require(row.arrangedSubviews.count == 2, "odd last key keeps the second column reserved")
+                let left = row.arrangedSubviews[0].convert(row.arrangedSubviews[0].bounds, to: grid)
+                let right = row.arrangedSubviews[1].convert(row.arrangedSubviews[1].bounds, to: grid)
+                require(abs(left.width - right.width) < 0.5, "API key columns have equal stable widths")
+                require(abs(right.minX - left.maxX - 14) < 0.5, "API key columns retain their horizontal gutter")
+                if row.arrangedSubviews[1].identifier != nil {
+                    require(abs(left.maxY - right.maxY) < 0.5, "keys in a pair are top aligned")
+                }
+            }
+            for (item, key) in zip(items, sortedKeys) {
+                let itemViews = descendants(of: item)
+                let labels = itemViews.compactMap { $0 as? NSTextField }
+                require(labels.first { $0.stringValue == key.name }?.toolTip == key.name, "long names remain available via tooltip")
+                let icon = itemViews.first { $0.identifier?.rawValue == "api-key-today-icon-\(key.id)" } as! NSImageView
+                require(icon.image?.isValid == true && icon.toolTip == "今日用量", "daily usage has a rendered calendar icon and tooltip")
+                require(icon.accessibilityLabel() == "今日用量", "daily usage icon has an accessible meaning")
+                let today = labels.first { $0.identifier?.rawValue == "api-key-today-value-\(key.id)" }!
+                require(today.stringValue == key.todayActualCost.map { String(format: "$%.2f", $0) } ?? "--", "daily amount remains accurate including unavailable values")
+                require(!labels.contains { $0.stringValue.hasPrefix("今日 ") }, "calendar replaces repeated daily text")
+                for label in labels {
+                    let bounds = label.convert(label.alignmentRect(forFrame: label.bounds), to: item)
+                    require(item.bounds.insetBy(dx: -0.5, dy: -0.5).contains(bounds), "key text is contained within its own column: key=\(key.id), label=\(label.stringValue), field=\(bounds), item=\(item.bounds)")
+                    if label.intrinsicContentSize.width > label.bounds.width {
+                        require(label.lineBreakMode == .byTruncatingTail && label.toolTip != nil, "truncated fields keep complete values in tooltips")
+                    }
+                }
+                let quota = labels.first { $0.identifier?.rawValue == "api-key-quota-\(key.id)" }
+                require((quota != nil) == (key.quota > 0), "optional quota details are preserved")
+            }
+            let expectedHeight = rows.reduce(CGFloat(0)) { $0 + $1.bounds.height } + CGFloat(max(rows.count - 1, 0)) * 8
+            let scroll = allViews.compactMap { $0 as? NSScrollView }.first { $0.identifier?.rawValue == "api-key-details" }
+            require((scroll != nil) == (expectedHeight > 172), "scrolling is based on paired row heights")
+            if let scroll {
+                require(scroll.bounds.height == 172, "large key grids keep a bounded height")
+                require(scroll.documentView!.bounds.width <= scroll.contentView.bounds.width, "scroller does not obscure the second column")
+                let scrollOffset = min(CGFloat(16), scroll.documentView!.bounds.height - scroll.contentView.bounds.height)
+                scroll.contentView.setBoundsOrigin(NSPoint(x: 0, y: scrollOffset))
+                scroll.reflectScrolledClipView(scroll.contentView)
+                keys[0].todayActualCost = (keys[0].todayActualCost ?? 0) + 0.01
+                await client.setUsage(data(keys: keys))
+                await store.refresh()
+                controller.refreshContent()
+                window.setContentSize(controller.preferredContentSize)
+                view.layoutSubtreeIfNeeded()
+                let refreshedScroll = descendants(of: view).compactMap { $0 as? NSScrollView }.first { $0.identifier?.rawValue == "api-key-details" }!
+                require(refreshedScroll !== scroll && abs(refreshedScroll.contentView.bounds.origin.y - scrollOffset) < 0.5, "grid rebuild preserves scroll position after usage changes")
+            }
+            if count == 4 || count == 9 && hasQuota,
+               let output = ProcessInfo.processInfo.environment["QUOTABAR_KEY_GRID_TEST_OUTPUT"] {
+                for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                    let theme = NSAppearance(named: appearance)!
+                    let previousAppearance = NSApp.appearance
+                    NSApp.appearance = theme
+                    defer { NSApp.appearance = previousAppearance }
+                    var imageData: Data?
+                    theme.performAsCurrentDrawingAppearance {
+                        let preview = UsagePopoverController(store: store, showPreferences: { _ in })
+                        let previewWindow = NSWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+                        previewWindow.appearance = theme
+                        previewWindow.contentViewController = preview
+                        previewWindow.setContentSize(preview.preferredContentSize)
+                        let previewView = preview.view
+                        previewView.layoutSubtreeIfNeeded()
+                        if let bitmap = previewView.bitmapImageRepForCachingDisplay(in: previewView.bounds) {
+                            previewView.cacheDisplay(in: previewView.bounds, to: bitmap)
+                            imageData = bitmap.representation(using: .png, properties: [:])
+                        }
+                        previewWindow.contentViewController = nil
+                    }
+                    require(imageData != nil, "key grid screenshot renders for each appearance")
+                    let url = URL(fileURLWithPath: output).appendingPathComponent("api-key-grid-\(count)-\(appearance == .aqua ? "light" : "dark").png")
+                    try imageData!.write(to: url)
+                }
+            }
+        }
     }
 
     private static func testDecodesUsageHistory() throws {

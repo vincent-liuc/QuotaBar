@@ -394,15 +394,17 @@ private final class UsageContentView: NSView {
         metrics.spacing = 9
 
         let row = NSStackView(views: [ringGroup, metrics])
+        row.identifier = NSUserInterfaceItemIdentifier("subscription-quota-summary")
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 13
         row.widthAnchor.constraint(equalToConstant: 286).isActive = true
         guard quotaKind == .weekly, let usage = snapshot.weeklyUsage else { return row }
         let section = NSStackView(views: [row, makeSubscriptionCountdowns(usage)])
+        section.identifier = NSUserInterfaceItemIdentifier("subscription-quota")
         section.orientation = .vertical
         section.alignment = .leading
-        section.spacing = 8
+        section.spacing = 4
         section.widthAnchor.constraint(equalToConstant: 286).isActive = true
         return section
     }
@@ -417,7 +419,7 @@ private final class UsageContentView: NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 4
+        stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
         for (index, reset) in resets.enumerated() {
             let countdown = label(subscriptionCountdownTitle(reset), size: 10, color: .secondaryLabelColor)
@@ -449,7 +451,7 @@ private final class UsageContentView: NSView {
             row.spacing = 8
             NSLayoutConstraint.activate([
                 row.widthAnchor.constraint(equalToConstant: width),
-                row.heightAnchor.constraint(equalToConstant: 20)
+                row.heightAnchor.constraint(equalToConstant: 16)
             ])
             stack.addArrangedSubview(row)
         }
@@ -474,7 +476,7 @@ private final class UsageContentView: NSView {
         scroll.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             scroll.widthAnchor.constraint(equalToConstant: 286),
-            scroll.heightAnchor.constraint(equalToConstant: 68)
+            scroll.heightAnchor.constraint(equalToConstant: 52)
         ])
         return scroll
     }
@@ -506,8 +508,10 @@ private final class UsageContentView: NSView {
         sections.spacing = 0
 
         func appendSection(_ view: NSView) {
-            if !sections.arrangedSubviews.isEmpty {
-                sections.addArrangedSubview(sectionSeparator())
+            if let previous = sections.arrangedSubviews.last {
+                sections.addArrangedSubview(sectionSeparator(
+                    height: previous.identifier?.rawValue == "subscription-quota" ? 9 : 13
+                ))
             }
             sections.addArrangedSubview(view)
         }
@@ -651,11 +655,21 @@ private final class UsageContentView: NSView {
     }
 
     private func makeKeyDetails(_ keys: [UsageKey]) -> NSView {
+        let keyRows = stride(from: 0, to: keys.count, by: 2).map {
+            Array(keys[$0..<min($0 + 2, keys.count)])
+        }
+        let rowHeights: [CGFloat] = keyRows.map { $0.contains { $0.quota > 0 } ? 56 : 32 }
+        let estimatedHeight = rowHeights.reduce(0, +) + CGFloat(max(keyRows.count - 1, 0)) * 8
+        let needsScroll = estimatedHeight > 172
+        let contentWidth: CGFloat = needsScroll ? 270 : 286
+        let columnWidth = (contentWidth - 14) / 2
         let stack = NSStackView()
+        stack.identifier = NSUserInterfaceItemIdentifier("api-key-grid")
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 2
+        stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
 
         if keys.isEmpty {
             let empty = label("暂无 API Key", size: 11, color: .secondaryLabelColor)
@@ -664,16 +678,27 @@ private final class UsageContentView: NSView {
             empty.heightAnchor.constraint(equalToConstant: 48).isActive = true
             stack.addArrangedSubview(empty)
         } else {
-            for key in keys {
-                stack.addArrangedSubview(makeKeyRow(key))
+            for (index, keysInRow) in keyRows.enumerated() {
+                let row = NSStackView(views: keysInRow.map { makeKeyItem($0, width: columnWidth) })
+                row.identifier = NSUserInterfaceItemIdentifier("api-key-row-\(index)")
+                row.orientation = .horizontal
+                row.alignment = .top
+                row.spacing = 14
+                if keysInRow.count == 1 {
+                    let placeholder = NSView()
+                    placeholder.widthAnchor.constraint(equalToConstant: columnWidth).isActive = true
+                    row.addArrangedSubview(placeholder)
+                }
+                NSLayoutConstraint.activate([
+                    row.widthAnchor.constraint(equalToConstant: contentWidth),
+                    row.heightAnchor.constraint(equalToConstant: rowHeights[index])
+                ])
+                stack.addArrangedSubview(row)
             }
         }
 
         let listView: NSView
-        let estimatedHeight = keys.reduce(CGFloat(0)) { partial, key in
-            partial + (key.quota > 0 ? 56 : 27)
-        } + CGFloat(max(keys.count - 1, 0) * 2)
-        if estimatedHeight <= 172 {
+        if !needsScroll {
             listView = stack
         } else {
             let documentView = FlippedView()
@@ -684,7 +709,7 @@ private final class UsageContentView: NSView {
                 stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
                 stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
                 stack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor),
-                documentView.widthAnchor.constraint(equalToConstant: 286)
+                documentView.widthAnchor.constraint(equalToConstant: contentWidth)
             ])
 
             let scroll = NSScrollView()
@@ -705,68 +730,96 @@ private final class UsageContentView: NSView {
         return listView
     }
 
-    private func makeKeyRow(_ key: UsageKey) -> NSView {
-        let leadingViews: [NSView]
+    private func makeKeyItem(_ key: UsageKey, width: CGFloat) -> NSView {
+        let item = NSView()
+        item.identifier = NSUserInterfaceItemIdentifier("api-key-item-\(key.id)")
+        item.translatesAutoresizingMaskIntoConstraints = false
+        let name = label(key.name, size: 11, weight: .medium)
+        name.toolTip = key.name
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        name.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        var titleViews: [NSView] = [name]
         if key.concurrency > 0 {
             let concurrency = label("● \(key.concurrency)", size: 10, weight: .medium, color: .systemGreen)
             concurrency.toolTip = "当前并发 \(key.concurrency)"
-            concurrency.setContentCompressionResistancePriority(.required, for: .horizontal)
-            leadingViews = [concurrency]
-        } else {
-            leadingViews = []
+            concurrency.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            concurrency.widthAnchor.constraint(lessThanOrEqualToConstant: 50).isActive = true
+            titleViews.append(concurrency)
         }
-        let name = label(key.name, size: 11, weight: .medium)
-        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let nameViews: [NSView] = key.group.map {
-            let group = label("\($0)", size: 9, color: .tertiaryLabelColor)
-            group.lineBreakMode = .byTruncatingTail
-            group.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            return group
-        }.map { [name, $0] } ?? [name]
-        let todayValue = key.todayActualCost.map(currency) ?? "--"
-        let value = label("今日 \(todayValue)",
-                          size: 11,
-                          color: .secondaryLabelColor)
-        value.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        value.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let spacer = NSView()
-        let top = NSStackView(views: nameViews + leadingViews + [spacer, value])
+        let top = NSStackView(views: titleViews)
         top.orientation = .horizontal
         top.alignment = .firstBaseline
-        top.spacing = 6
+        top.spacing = 4
 
-        top.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
-        top.widthAnchor.constraint(equalToConstant: 286).isActive = true
-
-        guard key.quota > 0 else {
-            top.heightAnchor.constraint(equalToConstant: 27).isActive = true
-            return top
+        let todayIcon = NSImageView(image: symbol("calendar", pointSize: 10))
+        todayIcon.identifier = NSUserInterfaceItemIdentifier("api-key-today-icon-\(key.id)")
+        todayIcon.contentTintColor = .secondaryLabelColor
+        todayIcon.toolTip = "今日用量"
+        todayIcon.setAccessibilityLabel("今日用量")
+        let todayValue = key.todayActualCost.map(currency) ?? "--"
+        let value = label(todayValue, size: 11, color: .secondaryLabelColor)
+        value.identifier = NSUserInterfaceItemIdentifier("api-key-today-value-\(key.id)")
+        value.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        value.toolTip = "今日用量：\(todayValue)"
+        value.setAccessibilityLabel("\(key.name)，今日用量：\(todayValue)")
+        var usageViews: [NSView] = [todayIcon, value, NSView()]
+        if let groupName = key.group, !groupName.isEmpty {
+            let group = label(groupName, size: 9, color: .tertiaryLabelColor)
+            group.toolTip = "分组：\(groupName)"
+            group.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            group.widthAnchor.constraint(lessThanOrEqualToConstant: width * 0.38).isActive = true
+            usageViews.append(group)
         }
+        let usage = NSStackView(views: usageViews)
+        usage.orientation = .horizontal
+        usage.alignment = .centerY
+        usage.spacing = 4
+        for content in [top, usage] {
+            content.translatesAutoresizingMaskIntoConstraints = false
+            item.addSubview(content)
+            NSLayoutConstraint.activate([
+                content.leadingAnchor.constraint(equalTo: item.leadingAnchor),
+                content.trailingAnchor.constraint(equalTo: item.trailingAnchor),
+                content.heightAnchor.constraint(equalToConstant: 14)
+            ])
+        }
+        NSLayoutConstraint.activate([
+            item.widthAnchor.constraint(equalToConstant: width),
+            item.heightAnchor.constraint(equalToConstant: key.quota > 0 ? 56 : 32),
+            top.topAnchor.constraint(equalTo: item.topAnchor),
+            usage.topAnchor.constraint(equalTo: top.bottomAnchor, constant: 4),
+            todayIcon.widthAnchor.constraint(equalToConstant: 12),
+            todayIcon.heightAnchor.constraint(equalToConstant: 12)
+        ])
+
+        guard key.quota > 0 else { return item }
 
         let quota = label(
-            "额度：\(currency(key.quotaUsed)) / \(currency(key.quota))",
-            size: 10,
+            "\(currency(key.quotaUsed)) / \(currency(key.quota))",
+            size: 9,
             color: .secondaryLabelColor
         )
-        quota.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        quota.identifier = NSUserInterfaceItemIdentifier("api-key-quota-\(key.id)")
+        quota.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        quota.toolTip = "已用额度 / 总额度：\(quota.stringValue)"
+        quota.setAccessibilityLabel(quota.toolTip)
+        quota.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        quota.translatesAutoresizingMaskIntoConstraints = false
         let progress = ThinQuotaProgressView(progress: key.progress)
         progress.translatesAutoresizingMaskIntoConstraints = false
+        item.addSubview(quota)
+        item.addSubview(progress)
         NSLayoutConstraint.activate([
-            progress.widthAnchor.constraint(equalToConstant: 286),
+            quota.leadingAnchor.constraint(equalTo: item.leadingAnchor),
+            quota.trailingAnchor.constraint(equalTo: item.trailingAnchor),
+            quota.topAnchor.constraint(equalTo: usage.bottomAnchor, constant: 4),
+            quota.heightAnchor.constraint(equalToConstant: 12),
+            progress.leadingAnchor.constraint(equalTo: item.leadingAnchor),
+            progress.trailingAnchor.constraint(equalTo: item.trailingAnchor),
+            progress.bottomAnchor.constraint(equalTo: item.bottomAnchor),
             progress.heightAnchor.constraint(equalToConstant: 4)
         ])
-        let detail = NSStackView(views: [quota, progress])
-        detail.orientation = .vertical
-        detail.alignment = .leading
-        detail.spacing = 4
-
-        let row = NSStackView(views: [top, detail])
-        row.orientation = .vertical
-        row.alignment = .leading
-        row.spacing = 1
-        row.widthAnchor.constraint(equalToConstant: 286).isActive = true
-        row.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 3, right: 0)
-        return row
+        return item
     }
 
     private func makeUsageHistory(_ records: [UsageRecord], timezone: String) -> NSView {
@@ -933,11 +986,12 @@ private final class UsageContentView: NSView {
         return tile
     }
 
-    private func sectionSeparator() -> NSView {
+    private func sectionSeparator(height: CGFloat = 13) -> NSView {
         let container = HairlineSeparatorView()
+        container.identifier = NSUserInterfaceItemIdentifier("section-separator")
         NSLayoutConstraint.activate([
             container.widthAnchor.constraint(equalToConstant: 286),
-            container.heightAnchor.constraint(equalToConstant: 13)
+            container.heightAnchor.constraint(equalToConstant: height)
         ])
         return container
     }
