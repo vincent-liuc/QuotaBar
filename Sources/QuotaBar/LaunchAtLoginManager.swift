@@ -1,7 +1,12 @@
 import Foundation
 import ServiceManagement
 
-final class LaunchAtLoginManager {
+protocol LaunchAtLoginManaging {
+    var statusDescription: String { get }
+    func setEnabled(_ enabled: Bool, refreshRegistration: Bool) throws
+}
+
+final class LaunchAtLoginManager: LaunchAtLoginManaging {
     var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled
     }
