@@ -80,10 +80,6 @@ final class UsageStore {
         var validatedProfile = try profile.validated()
         let result = try await client.testConnection(profile: validatedProfile, credentials: credentials)
         try Task.checkCancellation()
-        if case .manual(let id) = validatedProfile.subscriptionSelection,
-           !result.subscriptions.contains(where: { $0.id == id && $0.status == "active" }) {
-            throw APIClientError.missingSubscription
-        }
         validatedProfile.capabilities = result.capabilities
         validatedProfile.lastCheckedAt = result.checkedAt
         validatedProfile.lastAuthenticatedAt = result.checkedAt
@@ -250,10 +246,6 @@ final class UsageStore {
         validatedProfile.capabilities = testResult.capabilities
         validatedProfile.lastCheckedAt = testResult.checkedAt
         validatedProfile.lastAuthenticatedAt = testResult.checkedAt
-        if case .manual(let id) = validatedProfile.subscriptionSelection,
-           !testResult.subscriptions.contains(where: { $0.id == id && $0.status == "active" }) {
-            throw APIClientError.missingSubscription
-        }
 
         let updatedPreferences = UserPreferences(
             refreshInterval: refreshInterval,

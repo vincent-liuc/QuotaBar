@@ -27,35 +27,6 @@ enum StationKind: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum SubscriptionSelection: Codable, Equatable, Sendable {
-    case automatic
-    case manual(Int)
-
-    private enum CodingKeys: String, CodingKey { case mode, id }
-    private enum Mode: String, Codable { case automatic, manual }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(Mode.self, forKey: .mode) {
-        case .automatic:
-            self = .automatic
-        case .manual:
-            self = .manual(try container.decode(Int.self, forKey: .id))
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .automatic:
-            try container.encode(Mode.automatic, forKey: .mode)
-        case .manual(let id):
-            try container.encode(Mode.manual, forKey: .mode)
-            try container.encode(id, forKey: .id)
-        }
-    }
-}
-
 struct StationProfile: Codable, Equatable, Identifiable, Sendable {
     static let defaultServiceURL = "https://sub2apis.ruobin.dev"
     static let defaultAPIPath = "/api/v1"
@@ -66,7 +37,8 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
     var serviceURL: String
     var apiPath: String
     var timezone: String
-    var subscriptionSelection: SubscriptionSelection
+    // Older releases require this field when reading profiles after a rollback.
+    private let subscriptionSelection = ["mode": "automatic"]
     var automaticallyResetsAPIKeyQuota: Bool
     var capabilities: Set<StationCapability>
     var lastCheckedAt: Date?
@@ -86,7 +58,6 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
         serviceURL: String,
         apiPath: String? = nil,
         timezone: String = TimeZone.current.identifier,
-        subscriptionSelection: SubscriptionSelection = .automatic,
         automaticallyResetsAPIKeyQuota: Bool = false,
         capabilities: Set<StationCapability> = [],
         lastCheckedAt: Date? = nil,
@@ -99,7 +70,6 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
         self.serviceURL = serviceURL
         self.apiPath = apiPath ?? kind.defaultAPIPath
         self.timezone = timezone
-        self.subscriptionSelection = subscriptionSelection
         self.automaticallyResetsAPIKeyQuota = automaticallyResetsAPIKeyQuota
         self.capabilities = capabilities
         self.lastCheckedAt = lastCheckedAt
@@ -115,7 +85,6 @@ struct StationProfile: Codable, Equatable, Identifiable, Sendable {
         serviceURL = try container.decode(String.self, forKey: .serviceURL)
         apiPath = try container.decode(String.self, forKey: .apiPath)
         timezone = try container.decode(String.self, forKey: .timezone)
-        subscriptionSelection = try container.decode(SubscriptionSelection.self, forKey: .subscriptionSelection)
         automaticallyResetsAPIKeyQuota = try container.decodeIfPresent(
             Bool.self,
             forKey: .automaticallyResetsAPIKeyQuota
@@ -257,15 +226,7 @@ final class StationProfileStore: @unchecked Sendable {
     }
 }
 
-struct SubscriptionOption: Equatable, Sendable {
-    let id: Int
-    let name: String
-    let status: String
-    let hasWeeklyLimit: Bool
-}
-
 struct ConnectionTestResult: Equatable, Sendable {
     let capabilities: Set<StationCapability>
-    let subscriptions: [SubscriptionOption]
     let checkedAt: Date
 }

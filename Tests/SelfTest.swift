@@ -10,6 +10,7 @@ enum SelfTest {
         try testSubscriptionAggregation()
         try await testAggregatedSubscriptionAPI()
         try await testAggregatedSubscriptionDisplay()
+        try testSettingsWithoutSubscriptionSelection()
         testWeeklyUsageAndProgress()
         testPreferenceNormalization()
         try testStationProfiles()
@@ -32,7 +33,7 @@ enum SelfTest {
         testWeeklyResetCalculation()
         testWeeklyResetMonitor()
         try testCredentialFileStorage()
-        print("Self-test passed: 28 checks")
+        print("Self-test passed: 29 checks")
     }
 
     private static func testSubscriptionAggregation() throws {
@@ -49,7 +50,7 @@ enum SelfTest {
         ]
         """#
         let records = try decoder.decode([SubscriptionRecord].self, from: Data(json.utf8))
-        let summary = SubscriptionUsageSummary(subscriptions: records + [records[0]], selection: .automatic, now: now)
+        let summary = SubscriptionUsageSummary(subscriptions: records + [records[0]], now: now)
         let weekly = summary.weeklyUsage!
         require(weekly.total == 750 && weekly.used == 225, "active subscriptions sum limits and usage, excluding expired and duplicate IDs")
         require(weekly.subscriptionID == nil && weekly.subscriptionCount == 2, "aggregate retains count without pretending to be one subscription")
@@ -59,14 +60,10 @@ enum SelfTest {
         require(summary.dailyUsage?.total == 50 && summary.dailyUsage?.used == 10, "daily usage aggregates independently")
         require(summary.dailyUsage?.subscriptionCount == 2 && summary.dailyUsage?.subscriptionID == nil, "daily aggregate count")
 
-        let manual = SubscriptionUsageSummary(subscriptions: records, selection: .manual(2), now: now)
-        require(manual.weeklyUsage?.total == 250 && manual.weeklyUsage?.subscriptionID == 2, "manual selection remains a single subscription")
-        require(manual.dailyUsage?.subscriptionName == "Second" && manual.dailyUsage?.subscriptionCount == 1, "manual daily subscription name preserved")
-        for id in [3, 4, 5, 99] {
-            let invalid = SubscriptionUsageSummary(subscriptions: records, selection: .manual(id), now: now)
-            require(invalid.weeklyUsage == nil && invalid.dailyUsage == nil, "inactive, expired and missing manual subscriptions stay unavailable")
-        }
-        let empty = SubscriptionUsageSummary(subscriptions: Array(records[2...]), selection: .automatic, now: now)
+        let single = SubscriptionUsageSummary(subscriptions: [records[1]], now: now)
+        require(single.weeklyUsage?.total == 250 && single.weeklyUsage?.subscriptionID == 2, "one active subscription retains its own quota")
+        require(single.dailyUsage?.subscriptionName == "Second" && single.dailyUsage?.subscriptionCount == 1, "single subscription name preserved")
+        let empty = SubscriptionUsageSummary(subscriptions: Array(records[2...]), now: now)
         require(empty.weeklyUsage == nil && empty.dailyUsage == nil, "automatic mode never falls back to expired subscriptions")
 
         let mixedJSON = #"""
@@ -78,7 +75,7 @@ enum SelfTest {
         ]
         """#
         let mixed = try decoder.decode([SubscriptionRecord].self, from: Data(mixedJSON.utf8))
-        let mixedSummary = SubscriptionUsageSummary(subscriptions: mixed, selection: .automatic, now: now)
+        let mixedSummary = SubscriptionUsageSummary(subscriptions: mixed, now: now)
         require(mixedSummary.weeklyUsage?.total == 200 && mixedSummary.weeklyUsage?.subscriptionCount == 2, "daily-only and unbounded records do not create weekly limits")
         require(mixedSummary.weeklyUsage?.remaining == 90, "overage on one subscription does not consume another subscription's remaining quota")
         require(mixedSummary.weeklyUsage?.resetAt == nil, "missing reset windows do not fabricate countdowns")
@@ -109,6 +106,77 @@ enum SelfTest {
         )
         require(usage.weeklyUsage?.total == 750 && usage.weeklyUsage?.used == 225, "automatic API path publishes all subscriptions")
         require(usage.dailyUsage?.total == 50 && usage.dailyUsage?.used == 10, "automatic API path publishes daily aggregate")
+
+        for savedID in [1, 999] {
+            let legacyJSON = """
+            {"id":"00000000-0000-0000-0000-000000000002","name":"Legacy manual","serviceURL":"https://aggregate.example.com","apiPath":"/api/v1","timezone":"Asia/Shanghai","subscriptionSelection":{"mode":"manual","id":\(savedID)}}
+            """
+            let legacy = try JSONDecoder().decode(StationProfile.self, from: Data(legacyJSON.utf8))
+            let migratedUsage = try await client.fetchUsage(
+                profile: legacy,
+                credentials: Credentials(email: "test@example.com", password: "test")
+            )
+            require(migratedUsage.weeklyUsage?.total == 750 && migratedUsage.weeklyUsage?.subscriptionCount == 2, "legacy manual selection never limits weekly aggregation")
+            require(migratedUsage.dailyUsage?.total == 50, "legacy manual selection never limits daily aggregation")
+        }
+    }
+
+    @MainActor
+    private static func testSettingsWithoutSubscriptionSelection() throws {
+        _ = NSApplication.shared
+        let suiteName = "dev.ruobin.QuotaBar.SettingsUITest.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let profiles = StationProfileStore(defaults: defaults)
+        for kind in StationKind.allCases {
+            let profile = StationProfile(name: kind.displayName, kind: kind, serviceURL: "https://settings.example.com")
+            try profiles.save(StationProfilesState(profiles: [profile], activeProfileID: profile.id))
+            let store = UsageStore(
+                client: OnboardingUsageClient(),
+                credentialStore: CredentialStore(baseDirectory: directory),
+                profileStore: profiles,
+                preferencesStore: PreferencesStore(defaults: defaults),
+                launchAtLoginManager: TestLaunchAtLoginManager(),
+                weeklyResetMonitor: WeeklyResetMonitor(defaults: defaults),
+                startsPolling: false
+            )
+            let controller = PreferencesWindowController(store: store)
+            let view = controller.window!.contentViewController!.view
+            func descendants(of root: NSView) -> [NSView] {
+                [root] + root.subviews.flatMap { descendants(of: $0) }
+            }
+            let allViews = descendants(of: view)
+            let fields = allViews.compactMap { $0 as? NSTextField }
+            let buttons = allViews.compactMap { $0 as? NSButton }
+            buttons.first { $0.accessibilityLabel() == "站点" }!.performClick(nil)
+            view.layoutSubtreeIfNeeded()
+            require(!fields.contains { $0.stringValue == "订阅" }, "subscription selection row removed for every station kind")
+            require(!allViews.compactMap { $0 as? NSPopUpButton }.contains { popup in
+                popup.itemTitles.contains { $0.contains("订阅") }
+            }, "no hidden subscription selection popup remains")
+            let compatibility = fields.first { $0.stringValue == "兼容性测试" }!
+            require(!compatibility.isHiddenOrHasHiddenAncestor, "compatibility test remains visible after row removal")
+            let reset = fields.first { $0.stringValue == "自动重置用量" }!
+            require(reset.isHiddenOrHasHiddenAncestor == (kind == .newAPI), "only Sub2API shows the automatic reset row")
+            for field in fields where !field.isHiddenOrHasHiddenAncestor && !field.stringValue.isEmpty {
+                let bounds = field.convert(field.bounds, to: view)
+                require(view.bounds.insetBy(dx: -1, dy: -1).contains(bounds), "visible settings text remains within the window")
+            }
+            if let output = ProcessInfo.processInfo.environment["QUOTABAR_SETTINGS_TEST_OUTPUT"],
+               let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                let url = URL(fileURLWithPath: output).appendingPathComponent("settings-\(kind.rawValue).png")
+                try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+            }
+            buttons.first { $0.accessibilityLabel() == "显示" }!.performClick(nil)
+            let quotaDisplay = fields.first { $0.stringValue == "订阅额度" }!
+            require(!quotaDisplay.isHiddenOrHasHiddenAncestor, "quota visibility preference is preserved for both station kinds")
+            controller.window?.contentViewController = nil
+        }
     }
 
     @MainActor
@@ -659,6 +727,17 @@ enum SelfTest {
         try profileStore.save(StationProfilesState(profiles: [profile], activeProfileID: profile.id))
         require(profileStore.load().profiles == [profile], "station profiles persisted")
         require(profileStore.load().activeProfileID == profile.id, "active profile persisted")
+
+        let legacyStateJSON = """
+        {"profiles":[{"id":"00000000-0000-0000-0000-000000000001","name":"Legacy","serviceURL":"https://relay.example.com","apiPath":"/api/v1","timezone":"Asia/Shanghai","subscriptionSelection":{"mode":"manual","id":999},"capabilities":[]}],"activeProfileID":"00000000-0000-0000-0000-000000000001"}
+        """
+        defaults.set(Data(legacyStateJSON.utf8), forKey: "stationProfiles.v1")
+        let migrated = profileStore.load()
+        require(migrated.profiles == [legacy] && migrated.activeProfileID == legacy.id, "legacy manual selection is ignored without losing the station or credential identity")
+        try profileStore.save(migrated)
+        require(profileStore.load() == migrated, "migrated station configuration survives save and reload")
+        let saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(migrated.profiles[0])) as! [String: Any]
+        require(saved["subscriptionSelection"] as? [String: String] == ["mode": "automatic"], "rollback-compatible marker never preserves a manual selection")
     }
 
     private static func testReleaseResolution() throws {
@@ -1095,8 +1174,7 @@ enum SelfTest {
             profile: StationProfile(
                 name: "Test",
                 serviceURL: "https://relay.example.com/proxy",
-                timezone: "Asia/Shanghai",
-                subscriptionSelection: .manual(10)
+                timezone: "Asia/Shanghai"
             ),
             credentials: Credentials(email: "test@example.com", password: "test")
         )
@@ -1113,7 +1191,7 @@ enum SelfTest {
         require(usage.weeklyUsage?.resetAt != nil, "weekly reset derived from window start")
         require(usage.dailyUsage?.used == 6.25, "daily subscription usage decoded")
         require(usage.dailyUsage?.total == 20, "nested daily limit decoded")
-        require(usage.dailyUsage?.subscriptionName == "Weekly", "daily usage uses selected subscription")
+        require(usage.dailyUsage?.subscriptionName == "Weekly", "daily usage retains the single subscription name")
         require(usage.accountMetrics?.totalTokens == 137_630_389, "total tokens decoded")
         require(usage.accountMetrics?.totalActualCost == 106.38925756, "total actual cost decoded")
         require(usage.accountMetrics?.image2RequestCount == 121, "Image2 request count decoded")
@@ -1350,7 +1428,6 @@ private actor OnboardingUsageClient: UsageFetching {
         if let fetchError { throw fetchError }
         return ConnectionTestResult(
             capabilities: [.subscriptions, .accountMetrics],
-            subscriptions: [],
             checkedAt: Date()
         )
     }
@@ -1405,7 +1482,7 @@ private actor ControlledRefreshUsageClient: UsageFetching {
         profile: StationProfile,
         credentials: Credentials
     ) async throws -> ConnectionTestResult {
-        ConnectionTestResult(capabilities: [], subscriptions: [], checkedAt: Date())
+        ConnectionTestResult(capabilities: [], checkedAt: Date())
     }
 
     func invalidateSession() async {}

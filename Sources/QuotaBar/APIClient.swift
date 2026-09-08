@@ -4,7 +4,6 @@ enum APIClientError: LocalizedError, Equatable {
     case invalidResponse
     case httpStatus(Int)
     case api(code: Int, message: String)
-    case missingSubscription
     case incompatibleStation
     case authenticationFailed
     case twoFactorAuthenticationRequired
@@ -15,7 +14,6 @@ enum APIClientError: LocalizedError, Equatable {
         case .invalidResponse: return "服务器返回了无法识别的响应"
         case .httpStatus(let status): return "服务器请求失败（HTTP \(status)）"
         case .api(_, let message): return message
-        case .missingSubscription: return "没有找到可用的订阅周额度"
         case .incompatibleStation: return "该地址不是可识别的兼容站点"
         case .authenticationFailed: return "登录信息有误，请调整后再试"
         case .twoFactorAuthenticationRequired: return "该账户启用了两步验证，暂不支持直接登录，请先关闭两步验证或使用未启用 2FA 的账号"
@@ -94,7 +92,6 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
             var capabilities: Set<StationCapability> = []
             if keys.contains(where: { $0.currentConcurrency != nil }) { capabilities.insert(.concurrency) }
             let subscriptionResult = try? await fetchSubscriptions(profile: profile, token: token)
-            let subscriptions = subscriptionResult ?? []
             if subscriptionResult != nil { capabilities.insert(.subscriptions) }
             if (try? await fetchAccountMetrics(profile: profile, token: token)) != nil {
                 capabilities.insert(.accountMetrics)
@@ -108,22 +105,12 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
             }
             return ConnectionTestResult(
                 capabilities: capabilities,
-                subscriptions: subscriptions.compactMap {
-                    guard let id = $0.id else { return nil }
-                    return SubscriptionOption(
-                        id: id,
-                        name: $0.name ?? "订阅 #\(id)",
-                        status: $0.status,
-                        hasWeeklyLimit: $0.weeklyLimitUSD != nil
-                    )
-                },
                 checkedAt: Date()
             )
         case .newAPI:
             let usage = try await fetchNewAPIUsage(profile: profile, authenticated: authenticated)
             return ConnectionTestResult(
                 capabilities: usage.capabilities,
-                subscriptions: [],
                 checkedAt: Date()
             )
         }
@@ -185,7 +172,7 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         let usageResult = await todayUsage
         let historyResult = await usageHistory
         let subscriptionUsage = subscriptionResult.map {
-            SubscriptionUsageSummary(subscriptions: $0, selection: profile.subscriptionSelection)
+            SubscriptionUsageSummary(subscriptions: $0)
         }
         let weeklyUsage = subscriptionUsage?.weeklyUsage
         let dailyUsage = subscriptionUsage?.dailyUsage

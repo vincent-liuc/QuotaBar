@@ -592,8 +592,6 @@ struct DashboardIssue: Equatable, Sendable {
                 }
                 if code == 408 || code == 429 || code >= 500 { return temporaryIssue }
                 return DashboardIssue(kind: .unknown, message: message)
-            case .missingSubscription:
-                return stationIssue(apiError.localizedDescription)
             case .httpStatus:
                 return DashboardIssue(kind: .unknown, message: apiError.localizedDescription)
             }

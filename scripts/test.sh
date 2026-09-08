@@ -25,6 +25,7 @@ swiftc \
   "$project_dir/Sources/QuotaBar/LaunchAtLoginManager.swift" \
   "$project_dir/Sources/QuotaBar/UsageStore.swift" \
   "$project_dir/Sources/QuotaBar/UsagePopoverController.swift" \
+  "$project_dir/Sources/QuotaBar/PreferencesWindowController.swift" \
   "$project_dir/Sources/QuotaBar/StatusRingRenderer.swift" \
   "$project_dir/Tests/SelfTest.swift" \
   -o "$test_binary"

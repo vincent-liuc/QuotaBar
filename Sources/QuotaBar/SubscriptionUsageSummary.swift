@@ -4,12 +4,11 @@ struct SubscriptionUsageSummary: Equatable, Sendable {
     let weeklyUsage: WeeklyUsage?
     let dailyUsage: DailyUsage?
 
-    init(subscriptions: [SubscriptionRecord], selection: SubscriptionSelection, now: Date = Date()) {
+    init(subscriptions: [SubscriptionRecord], now: Date = Date()) {
         var seenIDs: Set<Int> = []
         let selected = subscriptions.filter { subscription in
             guard subscription.status == "active",
                   subscription.expiresAt.map({ $0 > now }) ?? true else { return false }
-            if case .manual(let id) = selection, subscription.id != id { return false }
             if let id = subscription.id, !seenIDs.insert(id).inserted { return false }
             return true
         }

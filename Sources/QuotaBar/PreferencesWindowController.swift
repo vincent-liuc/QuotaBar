@@ -45,7 +45,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let updater = AppUpdater()
     private var editingProfile: StationProfile
     private var profiles: [StationProfile]
-    private var subscriptions: [SubscriptionOption] = []
 
     private let profilePopup = NSPopUpButton()
     private let addProfileButton = NSButton()
@@ -55,7 +54,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
     private let serviceURLField = NSTextField()
     private let apiPathField = NSTextField()
     private let timezonePopup = NSPopUpButton()
-    private let subscriptionPopup = NSPopUpButton()
     private let automaticallyResetsAPIKeyQuotaSwitch = NSSwitch()
     private let emailField = NSTextField()
     private let passwordField = NSSecureTextField()
@@ -196,13 +194,10 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             stationKindPopup.addItem(withTitle: kind.displayName)
             stationKindPopup.lastItem?.representedObject = kind
         }
-        subscriptionPopup.addItem(withTitle: "全部有效订阅（汇总）")
         stationKindPopup.target = self
         stationKindPopup.action = #selector(stationKindChanged)
         timezonePopup.target = self
         timezonePopup.action = #selector(profileSelectionChanged)
-        subscriptionPopup.target = self
-        subscriptionPopup.action = #selector(profileSelectionChanged)
         automaticallyResetsAPIKeyQuotaSwitch.target = self
         automaticallyResetsAPIKeyQuotaSwitch.action = #selector(profileSelectionChanged)
         [launchAtLoginSwitch, showAPIKeyDetailsSwitch, showMetricCardsSwitch, showSubscriptionQuotaSwitch, showUsageHistorySwitch, showDailyUsageSwitch, automaticallyUpdatesSwitch].forEach {
@@ -307,7 +302,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             fieldRow(title: "服务地址", field: serviceURLField),
             fieldRow(title: "API 路径", field: apiPathField),
             settingsRow(title: "时区", control: timezonePopup),
-            settingsRow(title: "订阅", control: subscriptionPopup),
             settingsRow(title: "自动重置用量", control: resetControls),
             settingsRow(title: "兼容性测试", control: connectionControls)
         ]
@@ -529,11 +523,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         profile.apiPath = apiPathField.stringValue
         profile.timezone = timezonePopup.titleOfSelectedItem ?? TimeZone.current.identifier
         profile.automaticallyResetsAPIKeyQuota = automaticallyResetsAPIKeyQuotaSwitch.state == .on
-        if profile.kind == .newAPI || subscriptionPopup.indexOfSelectedItem <= 0 {
-            profile.subscriptionSelection = .automatic
-        } else if let id = subscriptionPopup.selectedItem?.representedObject as? Int {
-            profile.subscriptionSelection = .manual(id)
-        }
         return profile
     }
 
@@ -565,8 +554,6 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         passwordField.stringValue = credentials?.password ?? ""
         visiblePasswordField.stringValue = passwordField.stringValue
         loginStatusLabel.stringValue = "尚未测试"
-        subscriptions = []
-        reloadSubscriptionPopup(selection: profile.subscriptionSelection)
         updateProviderControls()
         connectionLabel.stringValue = capabilitySummary(profile)
         deleteProfileButton.isEnabled = profiles.count > 1
@@ -582,46 +569,17 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
         if let index = profiles.firstIndex(where: { $0.id == editingProfile.id }) { profilePopup.selectItem(at: index) }
     }
 
-    private func reloadSubscriptionPopup(selection: SubscriptionSelection) {
-        subscriptionPopup.removeAllItems()
-        guard editingProfile.kind == .sub2API else {
-            subscriptionPopup.addItem(withTitle: "不适用于 New API")
-            subscriptionPopup.lastItem?.isEnabled = false
-            subscriptionPopup.selectItem(at: 0)
-            return
-        }
-        subscriptionPopup.addItem(withTitle: "全部有效订阅（汇总）")
-        for option in subscriptions {
-            subscriptionPopup.addItem(withTitle: "\(option.name)\(option.status == "active" ? "" : "（已停用）")")
-            subscriptionPopup.lastItem?.representedObject = option.id
-            subscriptionPopup.lastItem?.isEnabled = option.status == "active"
-        }
-        if case .manual(let id) = selection {
-            if let index = subscriptionPopup.itemArray.firstIndex(where: { ($0.representedObject as? Int) == id }) {
-                subscriptionPopup.selectItem(at: index)
-            } else {
-                subscriptionPopup.addItem(withTitle: "订阅 #\(id)（已保存）")
-                subscriptionPopup.lastItem?.representedObject = id
-                subscriptionPopup.select(subscriptionPopup.lastItem)
-            }
-        } else {
-            subscriptionPopup.selectItem(at: 0)
-        }
-    }
-
     private func updateProviderControls() {
         let isSub2API = editingProfile.kind == .sub2API
-        subscriptionPopup.isEnabled = isSub2API
         automaticallyResetsAPIKeyQuotaSwitch.isEnabled = isSub2API
         if !isSub2API {
             automaticallyResetsAPIKeyQuotaSwitch.state = .off
-            subscriptionPopup.selectItem(at: 0)
         }
         apiPathField.placeholderString = editingProfile.kind.defaultAPIPath
         updatePanelVisibility(
             rows: stationRows,
             separators: stationSeparators,
-            hiddenIndices: isSub2API ? [] : [5, 6]
+            hiddenIndices: isSub2API ? [] : [5]
         )
         updatePanelVisibility(
             rows: displayRows,
@@ -715,12 +673,10 @@ private final class PreferencesViewController: NSViewController, NSTextFieldDele
             for task in pendingFieldSaves { await task.value }
             guard !Task.isCancelled else { return }
             do {
-                let result = try await store.testConnection(profile: profile, credentials: credentials)
+                _ = try await store.testConnection(profile: profile, credentials: credentials)
                 try Task.checkCancellation()
                 guard connectionTestID == testID, editingProfile.id == profileID,
                       let storedProfile = store.profiles.first(where: { $0.id == profileID }) else { return }
-                subscriptions = result.subscriptions
-                reloadSubscriptionPopup(selection: profile.subscriptionSelection)
                 editingProfile = storedProfile
                 profiles = store.profiles
                 reloadProfilePopup()
