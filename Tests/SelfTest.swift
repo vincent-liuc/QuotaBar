@@ -32,8 +32,9 @@ enum SelfTest {
         testDailyUpdateSchedule()
         testWeeklyResetCalculation()
         testWeeklyResetMonitor()
+        try await testFinalWeekResetAndRetry()
         try testCredentialFileStorage()
-        print("Self-test passed: 29 checks")
+        print("Self-test passed: 30 checks")
     }
 
     private static func testSubscriptionAggregation() throws {
@@ -63,6 +64,8 @@ enum SelfTest {
         let single = SubscriptionUsageSummary(subscriptions: [records[1]], now: now)
         require(single.weeklyUsage?.total == 250 && single.weeklyUsage?.subscriptionID == 2, "one active subscription retains its own quota")
         require(single.dailyUsage?.subscriptionName == "Second" && single.dailyUsage?.subscriptionCount == 1, "single subscription name preserved")
+        require(single.weeklyUsage?.windowStart == records[1].weeklyWindowStart, "actual weekly window is independent of countdown")
+        require(summary.weeklyUsage?.windowStart == nil, "aggregate has no shared server window")
         let empty = SubscriptionUsageSummary(subscriptions: Array(records[2...]), now: now)
         require(empty.weeklyUsage == nil && empty.dailyUsage == nil, "automatic mode never falls back to expired subscriptions")
 
@@ -562,14 +565,14 @@ enum SelfTest {
         let first = Date(timeIntervalSince1970: 1_800_000_000)
         require(
             monitor.resetPlan(
-                profileID: profileID, subscriptionID: 10, resetAt: first,
+                profileID: profileID, subscriptionID: 10, windowStart: first,
                 enabled: false, visibleKeyIDs: [105, 106]
             ).isEmpty,
             "disabled reset monitoring does nothing"
         )
         require(
             monitor.resetPlan(
-                profileID: profileID, subscriptionID: 10, resetAt: first,
+                profileID: profileID, subscriptionID: 10, windowStart: first,
                 enabled: true, visibleKeyIDs: [105, 106]
             ).isEmpty,
             "first reset observation establishes baseline"
@@ -578,56 +581,129 @@ enum SelfTest {
             monitor.resetPlan(
                 profileID: profileID,
                 subscriptionID: 10,
-                resetAt: first.addingTimeInterval(-60),
+                windowStart: first.addingTimeInterval(-60),
                 enabled: true,
                 visibleKeyIDs: [105, 106]
             ).isEmpty,
-            "countdown decrease does not trigger reset"
+            "older server window does not trigger reset"
         )
         let nextCycle = first.addingTimeInterval(7 * 86_400)
         require(
             monitor.resetPlan(
-                profileID: profileID, subscriptionID: 10, resetAt: nextCycle,
+                profileID: profileID, subscriptionID: 10, windowStart: nextCycle,
                 enabled: true, visibleKeyIDs: [106, 105]
             ) == [105, 106],
-            "forward reset-time jump triggers quota reset"
+            "forward server window triggers quota reset"
         )
         monitor.markKeyHandled(profileID: profileID, keyID: 105)
         require(
             monitor.resetPlan(
-                profileID: profileID, subscriptionID: 10, resetAt: nextCycle,
+                profileID: profileID, subscriptionID: 10, windowStart: nextCycle,
                 enabled: true, visibleKeyIDs: [105]
             ).isEmpty,
             "inactive pending keys are dropped before retry"
         )
         require(
             monitor.resetPlan(
-                profileID: profileID, subscriptionID: 11, resetAt: nextCycle,
+                profileID: profileID, subscriptionID: 11, windowStart: nextCycle,
                 enabled: true, visibleKeyIDs: [105, 106]
             ).isEmpty,
             "subscription change establishes a new baseline"
         )
         require(
             monitor.resetPlan(
-                profileID: profileID, subscriptionID: nil, resetAt: nextCycle,
+                profileID: profileID, subscriptionID: nil, windowStart: nextCycle,
                 enabled: true, visibleKeyIDs: [105, 106], subscriptionCount: 2
             ).isEmpty,
             "multi-subscription mode disables whole-account quota resets"
         )
         require(
             monitor.resetPlan(
-                profileID: profileID, subscriptionID: nil, resetAt: nextCycle.addingTimeInterval(86_400),
+                profileID: profileID, subscriptionID: nil, windowStart: nextCycle.addingTimeInterval(86_400),
                 enabled: true, visibleKeyIDs: [105, 106], subscriptionCount: 2
             ).isEmpty,
             "advancing an individual reset in an aggregate never resets all keys"
         )
         require(
             monitor.resetPlan(
-                profileID: profileID, subscriptionID: 11, resetAt: nextCycle.addingTimeInterval(7 * 86_400),
+                profileID: profileID, subscriptionID: 11, windowStart: nextCycle.addingTimeInterval(7 * 86_400),
                 enabled: true, visibleKeyIDs: [105, 106]
             ).isEmpty,
             "returning from aggregate mode starts a new single-subscription baseline"
         )
+    }
+
+    @MainActor
+    private static func testFinalWeekResetAndRetry() async throws {
+        let suiteName = "dev.ruobin.QuotaBar.FinalWeekTest.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let profile = StationProfile(
+            name: "Final week", serviceURL: "https://reset.example.com",
+            automaticallyResetsAPIKeyQuota: true, lastCheckedAt: Date(), lastAuthenticatedAt: Date()
+        )
+        let profileStore = StationProfileStore(defaults: defaults)
+        try profileStore.save(StationProfilesState(profiles: [profile], activeProfileID: profile.id))
+        let credentials = CredentialStore(baseDirectory: directory)
+        try credentials.save(Credentials(email: "test@example.com", password: "test"), for: profile.id)
+        let client = OnboardingUsageClient()
+        let formatter = ISO8601DateFormatter()
+        let oldStart = formatter.date(from: "2026-09-07T02:54:06Z")!
+        let newStart = formatter.date(from: "2026-09-08T01:37:18Z")!
+        let expiry = formatter.date(from: "2026-09-14T05:42:26Z")!
+        let now = formatter.date(from: "2026-09-08T01:38:00Z")!
+        let legacy: [String: Any] = [profile.id.uuidString: [
+            "subscriptionID": 48, "resetAt": oldStart.timeIntervalSinceReferenceDate,
+            "pendingKeyIDs": [1, 2]
+        ]]
+        defaults.set(try JSONSerialization.data(withJSONObject: legacy), forKey: "weeklyResetObservations.v1")
+        let monitor = WeeklyResetMonitor(defaults: defaults)
+        let store = UsageStore(
+            client: client, credentialStore: credentials, profileStore: profileStore,
+            preferencesStore: PreferencesStore(defaults: defaults),
+            launchAtLoginManager: TestLaunchAtLoginManager(), weeklyResetMonitor: monitor,
+            startsPolling: false
+        )
+        func usage(start: Date) throws -> UsageData {
+            let json = """
+            [{"id":48,"status":"active","weekly_limit_usd":500,"weekly_usage_usd":1.25,"weekly_window_start":"\(formatter.string(from: start))","expires_at":"\(formatter.string(from: expiry))"}]
+            """
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
+            let records = try decoder.decode([SubscriptionRecord].self, from: Data(json.utf8))
+            let summary = SubscriptionUsageSummary(subscriptions: records, now: now)
+            return UsageData(
+                weeklyUsage: summary.weeklyUsage, dailyUsage: nil, accountMetrics: nil,
+                keys: [usageKey(id: 1, total: 300, used: 145), usageKey(id: 2, total: 50, used: 17)],
+                usageRecords: [], capabilities: [.subscriptions]
+            )
+        }
+        await client.setUsage(try usage(start: oldStart))
+        await store.refresh()
+        var calls = await client.resetCallCount
+        require(calls == 0, "upgrade establishes a server-window baseline without replaying legacy countdown state")
+        let finalWeek = try usage(start: newStart)
+        require(finalWeek.weeklyUsage?.resetAt == nil && finalWeek.weeklyUsage?.windowStart == newStart, "last week keeps the actual reset event even without a future countdown")
+        await client.setUsage(finalWeek)
+        await client.failNextResets(1)
+        await store.refresh()
+        calls = await client.resetCallCount
+        require(calls == 2, "actual window change resets all eligible keys in the final week")
+        await store.refresh()
+        let resetIDs = await client.resetKeyIDs
+        require(resetIDs == [1, 2, 1], "only the failed key retries; successful keys are not reset twice")
+        await store.refresh()
+        calls = await client.resetCallCount
+        require(calls == 3, "repeated refresh of the same window never repeats completed resets")
+        let restarted = WeeklyResetMonitor(defaults: defaults)
+        require(restarted.resetPlan(profileID: profile.id, subscriptionID: 48, windowStart: newStart, enabled: true, visibleKeyIDs: [1, 2]).isEmpty, "completed server window persists across restarts")
+        require(restarted.resetPlan(profileID: profile.id, subscriptionID: 48, windowStart: oldStart, enabled: true, visibleKeyIDs: [1, 2]).isEmpty, "stale server response does not rewind the baseline")
+        require(restarted.resetPlan(profileID: profile.id, subscriptionID: 48, windowStart: newStart, enabled: true, visibleKeyIDs: [1, 2]).isEmpty, "recovery from stale data does not create a false reset")
+        require(restarted.resetPlan(profileID: profile.id, subscriptionID: 48, windowStart: newStart.addingTimeInterval(60), enabled: true, visibleKeyIDs: [1, 2]) == [1, 2], "server-confirmed resets within five minutes are not suppressed")
     }
 
     private static func testAPIKeyQuotaResetRequest() async throws {
@@ -1189,6 +1265,7 @@ enum SelfTest {
         require(usage.weeklyUsage?.used == 52.71, "weekly usage decoded")
         require(usage.weeklyUsage?.total == 500, "nested weekly limit decoded")
         require(usage.weeklyUsage?.resetAt != nil, "weekly reset derived from window start")
+        require(usage.weeklyUsage?.windowStart != nil, "API passes the server window to reset monitoring")
         require(usage.dailyUsage?.used == 6.25, "daily subscription usage decoded")
         require(usage.dailyUsage?.total == 20, "nested daily limit decoded")
         require(usage.dailyUsage?.subscriptionName == "Weekly", "daily usage retains the single subscription name")
@@ -1379,6 +1456,12 @@ private actor OnboardingUsageClient: UsageFetching {
     private var stationError: APIClientError?
     private var usageOverride: UsageData?
     private(set) var resetCallCount = 0
+    private(set) var resetKeyIDs: [Int] = []
+    private var resetFailuresRemaining = 0
+
+    func failNextResets(_ count: Int) {
+        resetFailuresRemaining = count
+    }
 
     func setUsage(_ usage: UsageData) {
         usageOverride = usage
@@ -1411,6 +1494,11 @@ private actor OnboardingUsageClient: UsageFetching {
         keyID: Int
     ) async throws {
         resetCallCount += 1
+        resetKeyIDs.append(keyID)
+        if resetFailuresRemaining > 0 {
+            resetFailuresRemaining -= 1
+            throw APIClientError.httpStatus(503)
+        }
     }
 
     func testStation(profile: StationProfile) async throws {

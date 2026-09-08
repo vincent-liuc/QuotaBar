@@ -348,7 +348,7 @@ final class UsageStore {
                 let keyIDs = weeklyResetMonitor.resetPlan(
                     profileID: profile.id,
                     subscriptionID: weeklyUsage.subscriptionID,
-                    resetAt: weeklyUsage.resetAt,
+                    windowStart: weeklyUsage.windowStart,
                     enabled: profile.automaticallyResetsAPIKeyQuota,
                     visibleKeyIDs: usage.keys.filter(\.isVisible).map(\.id),
                     subscriptionCount: weeklyUsage.subscriptionCount
@@ -367,6 +367,7 @@ final class UsageStore {
                         weeklyResetMonitor.markKeyHandled(profileID: profile.id, keyID: keyID)
                         resetSucceeded = true
                     } catch {
+                        weeklyResetMonitor.markKeyFailed(profileID: profile.id, keyID: keyID)
                         resetFailed = true
                         NSLog("QuotaBar API key %d quota reset failed: %@", keyID, error.localizedDescription)
                     }

@@ -301,6 +301,7 @@ struct WeeklyUsage: Equatable, Sendable {
     let used: Double
     let total: Double
     let resetAt: Date?
+    let windowStart: Date?
     let subscriptionCount: Int
     let remaining: Double
 
@@ -311,13 +312,15 @@ struct WeeklyUsage: Equatable, Sendable {
         total: Double,
         resetAt: Date? = nil,
         subscriptionCount: Int = 1,
-        remaining: Double? = nil
+        remaining: Double? = nil,
+        windowStart: Date? = nil
     ) {
         self.kind = kind
         self.subscriptionID = subscriptionID
         self.used = used
         self.total = total
         self.resetAt = resetAt
+        self.windowStart = windowStart
         self.subscriptionCount = subscriptionCount
         self.remaining = remaining ?? max(total - used, 0)
     }

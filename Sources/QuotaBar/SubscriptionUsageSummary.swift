@@ -22,7 +22,8 @@ struct SubscriptionUsageSummary: Equatable, Sendable {
                     windowStart: subscription.weeklyWindowStart,
                     expiresAt: subscription.expiresAt,
                     now: now
-                )
+                ),
+                windowStart: subscription.weeklyWindowStart
             )
         }
         if weekly.count > 1 {

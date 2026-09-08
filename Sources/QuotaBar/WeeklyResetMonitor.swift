@@ -2,21 +2,20 @@ import Foundation
 
 struct WeeklyResetObservation: Codable, Equatable, Sendable {
     let subscriptionID: Int?
-    let resetAt: Date
+    let windowStart: Date
     var pendingKeyIDs: [Int]
 
-    init(subscriptionID: Int?, resetAt: Date, pendingKeyIDs: [Int] = []) {
+    init(subscriptionID: Int?, windowStart: Date, pendingKeyIDs: [Int] = []) {
         self.subscriptionID = subscriptionID
-        self.resetAt = resetAt
+        self.windowStart = windowStart
         self.pendingKeyIDs = pendingKeyIDs
     }
 }
 
 final class WeeklyResetMonitor: @unchecked Sendable {
-    static let minimumForwardJump: TimeInterval = 5 * 60
-
     private let defaults: UserDefaults
-    private let key = "weeklyResetObservations.v1"
+    // Countdown-based v1 observations cannot identify actual server cycles reliably.
+    private let key = "weeklyResetObservations.v2"
     private let lock = NSLock()
     private var claimedKeyIDs: [String: Set<Int>] = [:]
 
@@ -27,7 +26,7 @@ final class WeeklyResetMonitor: @unchecked Sendable {
     func resetPlan(
         profileID: UUID,
         subscriptionID: Int?,
-        resetAt: Date?,
+        windowStart: Date?,
         enabled: Bool,
         visibleKeyIDs: [Int],
         subscriptionCount: Int = 1
@@ -39,8 +38,8 @@ final class WeeklyResetMonitor: @unchecked Sendable {
                 removeObservationUnlocked(for: profileID)
                 return []
             }
-            guard let resetAt else { return [] }
-            let current = WeeklyResetObservation(subscriptionID: subscriptionID, resetAt: resetAt)
+            guard let windowStart else { return [] }
+            let current = WeeklyResetObservation(subscriptionID: subscriptionID, windowStart: windowStart)
             guard let previous = observations()[profileKey],
                   previous.subscriptionID == subscriptionID else {
                 claimedKeyIDs[profileKey] = nil
@@ -49,7 +48,7 @@ final class WeeklyResetMonitor: @unchecked Sendable {
             }
 
             let pending: [Int]
-            if !previous.pendingKeyIDs.isEmpty {
+            if windowStart <= previous.windowStart {
                 let visible = Set(visibleKeyIDs)
                 pending = previous.pendingKeyIDs.filter(visible.contains)
                 claimedKeyIDs[profileKey]?.formIntersection(visible)
@@ -57,23 +56,19 @@ final class WeeklyResetMonitor: @unchecked Sendable {
                     save(
                         WeeklyResetObservation(
                             subscriptionID: previous.subscriptionID,
-                            resetAt: previous.resetAt,
+                            windowStart: previous.windowStart,
                             pendingKeyIDs: pending
                         ),
                         for: profileID
                     )
                 }
             } else {
-                guard resetAt.timeIntervalSince(previous.resetAt) > Self.minimumForwardJump else {
-                    claimedKeyIDs[profileKey] = nil
-                    save(current, for: profileID)
-                    return []
-                }
+                claimedKeyIDs[profileKey] = nil
                 pending = Array(Set(visibleKeyIDs)).sorted()
                 save(
                     WeeklyResetObservation(
                         subscriptionID: subscriptionID,
-                        resetAt: resetAt,
+                        windowStart: windowStart,
                         pendingKeyIDs: pending
                     ),
                     for: profileID
@@ -100,7 +95,7 @@ final class WeeklyResetMonitor: @unchecked Sendable {
     }
 
     func markKeyFailed(profileID: UUID, keyID: Int) {
-        lock.withLock {
+        _ = lock.withLock {
             claimedKeyIDs[profileID.uuidString]?.remove(keyID)
         }
     }
