@@ -427,8 +427,9 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
         ]
         let request = authenticatedRequest(URLRequest(url: components.url!), token: token)
         let envelope: APIEnvelope<DashboardModelUsageData> = try await send(request)
-        let requests = envelope.data.models.first { $0.model == "gpt-image-2" }?.requests ?? 0
-        return max(requests, 0)
+        return envelope.data.models
+            .filter { $0.model == "gpt-image-2" || $0.model == "gpt-image-2.5-sunburst" }
+            .reduce(0) { $0 + max($1.requests, 0) }
     }
 
     private func fetchUsageHistory(profile: StationProfile, token: String) async throws -> [UsageRecord] {

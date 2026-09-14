@@ -1429,7 +1429,7 @@ enum SelfTest {
                 require(query("timezone") == "Asia/Shanghai", "Image2 usage uses station timezone")
                 return mockResponse(
                     url: url,
-                    json: #"{"code":0,"message":"success","data":{"start_date":"2026-01-01","end_date":"2026-08-27","models":[{"model":"gpt-image-2","requests":121},{"model":"gpt-5.6","requests":42}]}}"#
+                    json: #"{"code":0,"message":"success","data":{"start_date":"2026-01-01","end_date":"2026-08-27","models":[{"model":"gpt-image-2","requests":121},{"model":"gpt-image-2.5-sunburst","requests":46},{"model":"gpt-image-2.5-flare","requests":19},{"model":"gpt-5.6","requests":42}]}}"#
                 )
             }
             if url.path.hasSuffix("/api/v1/usage/dashboard/api-keys-usage") {
@@ -1513,7 +1513,7 @@ enum SelfTest {
         require(usage.dailyUsage?.subscriptionName == "Weekly", "daily usage retains the single subscription name")
         require(usage.accountMetrics?.totalTokens == 137_630_389, "total tokens decoded")
         require(usage.accountMetrics?.totalActualCost == 106.38925756, "total actual cost decoded")
-        require(usage.accountMetrics?.image2RequestCount == 121, "Image2 request count decoded")
+        require(usage.accountMetrics?.image2RequestCount == 167, "IMG sums image-2 and sunburst requests, excluding other models")
         require(usage.capabilities.contains(.apiKeyDailyUsage), "daily usage capability detected")
         require(usage.capabilities.contains(.usageHistory), "usage history capability detected")
         require(usage.usageRecords?.count == 12, "all fetched usage history retained in data layer")
