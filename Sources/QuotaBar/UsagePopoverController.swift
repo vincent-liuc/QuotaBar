@@ -843,7 +843,7 @@ private final class UsageContentView: NSView {
         }
 
         let list: NSView
-        let listHeight = CGFloat(records.prefix(UsageSnapshot.maximumUsageRecords).count * 39)
+        let listHeight = CGFloat(records.prefix(UsageSnapshot.maximumUsageRecords).count * 53)
         if listHeight <= 195 {
             list = rows
         } else {
@@ -904,7 +904,7 @@ private final class UsageContentView: NSView {
         ].map { title, value in
             "\(title)：\(value.map { String($0) } ?? "未提供")"
         }.joined(separator: "\n")
-        let top = NSStackView(views: [key, NSView(), tokens, cost])
+        let top = NSStackView(views: [key, NSView(), cost])
         top.orientation = .horizontal
         top.alignment = .firstBaseline
         top.spacing = 6
@@ -917,7 +917,9 @@ private final class UsageContentView: NSView {
         bottom.orientation = .horizontal
         bottom.alignment = .firstBaseline
 
-        let row = NSStackView(views: [top, bottom])
+        tokens.alignment = .right
+        tokens.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        let row = NSStackView(views: [top, tokens, bottom])
         row.orientation = .vertical
         row.alignment = .leading
         row.spacing = 2
@@ -925,7 +927,7 @@ private final class UsageContentView: NSView {
         top.widthAnchor.constraint(equalToConstant: 286).isActive = true
         bottom.widthAnchor.constraint(equalToConstant: 286).isActive = true
         row.widthAnchor.constraint(equalToConstant: 286).isActive = true
-        row.heightAnchor.constraint(equalToConstant: 37).isActive = true
+        row.heightAnchor.constraint(equalToConstant: 51).isActive = true
         return row
     }
 

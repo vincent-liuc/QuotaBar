@@ -280,6 +280,9 @@ enum SelfTest {
         require(tokenFields.contains { $0.stringValue == "输入 —   输出 0   缓存 —" }, "unknown and zero tokens remain distinct in UI")
         for field in tokenFields {
             require(field.bounds.width >= field.intrinsicContentSize.width, "token breakdown fits without truncation")
+            require(field.alignment == .right, "tokens are right aligned")
+            let row = field.superview as? NSStackView
+            require(row?.arrangedSubviews.count == 3 && row?.arrangedSubviews[1] === field, "tokens occupy the second of three lines")
             require(field.toolTip?.contains("缓存读取 Token") == true, "exact token values available on hover")
         }
         let countLabel = fields.first { $0.stringValue == "2 个订阅" }!
