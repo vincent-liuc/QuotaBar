@@ -275,15 +275,33 @@ enum SelfTest {
         for value in ["2 个订阅", "每日用量（2 个订阅）", "$750.00", "$225.00", "$525.00"] {
             require(fields.contains { $0.stringValue == value }, "aggregate UI renders \(value)")
         }
-        let tokenFields = fields.filter { $0.stringValue.hasPrefix("输入 ") }
-        require(tokenFields.count == 8, "each usage record renders tokens")
-        require(tokenFields.contains { $0.stringValue == "输入 —   输出 0   缓存 —" }, "unknown and zero tokens remain distinct in UI")
-        for field in tokenFields {
-            require(field.bounds.width >= field.intrinsicContentSize.width, "token breakdown fits without truncation")
-            require(field.alignment == .right, "tokens are right aligned")
-            let row = field.superview as? NSStackView
-            require(row?.arrangedSubviews.count == 3 && row?.arrangedSubviews[1] === field, "tokens occupy the second of three lines")
-            require(field.toolTip?.contains("缓存读取 Token") == true, "exact token values available on hover")
+        func infoButtons(in root: NSView) -> [UsageTokenInfoButton] {
+            (root as? UsageTokenInfoButton).map { [$0] } ?? root.subviews.flatMap { infoButtons(in: $0) }
+        }
+        let buttons = infoButtons(in: view)
+        require(buttons.count == 8, "each usage record has a token info button")
+        require(!fields.contains { $0.stringValue.hasPrefix("输入 ") }, "token details are collapsed")
+        if ProcessInfo.processInfo.environment["QUOTABAR_UI_TEST_OUTPUT"] != nil {
+        window.orderFront(nil)
+        buttons[0].performClick(nil)
+        require(buttons[0].detailsPopover.isShown, "click opens token details")
+        let detailView = buttons[0].detailsPopover.contentViewController!.view
+        detailView.layoutSubtreeIfNeeded()
+        let detailFields = labels(in: detailView)
+        for value in ["输入 Token", "输出 Token", "缓存读取 Token", "224", "87", "142,208"] {
+            require(detailFields.contains { $0.stringValue == value }, "popover shows exact token detail")
+        }
+        if let output = ProcessInfo.processInfo.environment["QUOTABAR_UI_TEST_OUTPUT"],
+           let bitmap = detailView.bitmapImageRepForCachingDisplay(in: detailView.bounds) {
+            detailView.cacheDisplay(in: detailView.bounds, to: bitmap)
+            try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: output + ".details.png"))
+        }
+        buttons[0].performClick(nil)
+        require(!buttons[0].detailsPopover.isShown, "second click closes token details")
+        let missingFields = labels(in: buttons[1].detailsPopover.contentViewController!.view)
+        require(missingFields.filter { $0.stringValue == "—" }.count == 2 && missingFields.contains { $0.stringValue == "0" }, "popover distinguishes missing values and zero")
+        window.orderOut(nil)
+        print("Token popover interaction checks passed")
         }
         let countLabel = fields.first { $0.stringValue == "2 个订阅" }!
         require(countLabel.toolTip?.contains("最近一次订阅重置") == true, "aggregate tooltip distinguishes the next individual reset")

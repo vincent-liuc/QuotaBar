@@ -843,7 +843,7 @@ private final class UsageContentView: NSView {
         }
 
         let list: NSView
-        let listHeight = CGFloat(records.prefix(UsageSnapshot.maximumUsageRecords).count * 53)
+        let listHeight = CGFloat(records.prefix(UsageSnapshot.maximumUsageRecords).count * 39)
         if listHeight <= 195 {
             list = rows
         } else {
@@ -887,24 +887,8 @@ private final class UsageContentView: NSView {
         let cost = label(usageCost(record.actualCost), size: 10, weight: .medium)
         cost.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         cost.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let tokenText = [
-            ("输入", record.inputTokens),
-            ("输出", record.outputTokens),
-            ("缓存", record.cacheReadTokens)
-        ].map { title, value in
-            "\(title) \(value.map { compactTokenCount($0) } ?? "—")"
-        }.joined(separator: "   ")
-        let tokens = label(tokenText, size: 9, color: .secondaryLabelColor)
-        tokens.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
-        tokens.setContentCompressionResistancePriority(.required, for: .horizontal)
-        tokens.toolTip = [
-            ("输入 Token", record.inputTokens),
-            ("输出 Token", record.outputTokens),
-            ("缓存读取 Token", record.cacheReadTokens)
-        ].map { title, value in
-            "\(title)：\(value.map { String($0) } ?? "未提供")"
-        }.joined(separator: "\n")
-        let top = NSStackView(views: [key, NSView(), cost])
+        let info = UsageTokenInfoButton(record: record)
+        let top = NSStackView(views: [key, NSView(), cost, info])
         top.orientation = .horizontal
         top.alignment = .firstBaseline
         top.spacing = 6
@@ -917,9 +901,7 @@ private final class UsageContentView: NSView {
         bottom.orientation = .horizontal
         bottom.alignment = .firstBaseline
 
-        tokens.alignment = .right
-        tokens.widthAnchor.constraint(equalToConstant: 286).isActive = true
-        let row = NSStackView(views: [top, tokens, bottom])
+        let row = NSStackView(views: [top, bottom])
         row.orientation = .vertical
         row.alignment = .leading
         row.spacing = 2
@@ -927,7 +909,7 @@ private final class UsageContentView: NSView {
         top.widthAnchor.constraint(equalToConstant: 286).isActive = true
         bottom.widthAnchor.constraint(equalToConstant: 286).isActive = true
         row.widthAnchor.constraint(equalToConstant: 286).isActive = true
-        row.heightAnchor.constraint(equalToConstant: 51).isActive = true
+        row.heightAnchor.constraint(equalToConstant: 37).isActive = true
         return row
     }
 
@@ -1139,6 +1121,78 @@ private final class UsageContentView: NSView {
 }
 
 @MainActor
+final class UsageTokenInfoButton: NSButton {
+    let detailsPopover = NSPopover()
+
+    init(record: UsageRecord) {
+        super.init(frame: .zero)
+        image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "查看 Token 明细")
+        imagePosition = .imageOnly
+        isBordered = false
+        contentTintColor = .secondaryLabelColor
+        toolTip = "查看输入、输出和缓存 Token"
+        setAccessibilityLabel("查看 Token 明细")
+        target = self
+        action = #selector(toggleDetails)
+        translatesAutoresizingMaskIntoConstraints = false
+        widthAnchor.constraint(equalToConstant: 16).isActive = true
+        heightAnchor.constraint(equalToConstant: 16).isActive = true
+
+        let content = NSStackView()
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 8
+        content.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14)
+        content.addArrangedSubview(label("Token 明细", size: 11, weight: .semibold))
+        for (title, value) in [
+            ("输入 Token", record.inputTokens),
+            ("输出 Token", record.outputTokens),
+            ("缓存读取 Token", record.cacheReadTokens)
+        ] {
+            let name = label(title, size: 11, color: .secondaryLabelColor)
+            let number = label(value.map { $0.formatted(.number.locale(Locale(identifier: "en_US"))) } ?? "—", size: 11)
+            number.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            number.setContentCompressionResistancePriority(.required, for: .horizontal)
+            let line = NSStackView(views: [name, NSView(), number])
+            line.orientation = .horizontal
+            line.alignment = .firstBaseline
+            line.widthAnchor.constraint(equalToConstant: 220).isActive = true
+            content.addArrangedSubview(line)
+        }
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 248, height: 112))
+        content.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(content)
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            content.topAnchor.constraint(equalTo: container.topAnchor),
+            content.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+        let controller = NSViewController()
+        controller.view = container
+        detailsPopover.contentViewController = controller
+        detailsPopover.contentSize = NSSize(width: 248, height: 112)
+        detailsPopover.behavior = .transient
+        detailsPopover.animates = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    @objc private func toggleDetails() {
+        if detailsPopover.isShown {
+            detailsPopover.performClose(nil)
+        } else {
+            detailsPopover.appearance = effectiveAppearance
+            detailsPopover.show(relativeTo: bounds, of: self, preferredEdge: .maxY)
+        }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil { detailsPopover.performClose(nil) }
+        super.viewWillMove(toWindow: newWindow)
+    }
+}
+
 private final class DashboardActionButton: NSButton {
     private let handler: () -> Void
     private let hostedContentView: NSView
