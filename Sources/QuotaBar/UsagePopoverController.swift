@@ -889,8 +889,9 @@ private final class UsageContentView: NSView {
         cost.setContentCompressionResistancePriority(.required, for: .horizontal)
         let info = UsageTokenInfoButton(record: record)
         let top = NSStackView(views: [key, NSView(), cost, info])
+        info.heightAnchor.constraint(equalTo: cost.heightAnchor).isActive = true
         top.orientation = .horizontal
-        top.alignment = .firstBaseline
+        top.alignment = .centerY
         top.spacing = 6
 
         let effort = label(reasoningEffortTitle(record.reasoningEffort), size: 9, color: .tertiaryLabelColor)
@@ -1126,7 +1127,8 @@ final class UsageTokenInfoButton: NSButton {
 
     init(record: UsageRecord) {
         super.init(frame: .zero)
-        image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "查看 Token 明细")
+        image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "查看 Token 明细")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .medium))
         imagePosition = .imageOnly
         isBordered = false
         contentTintColor = .secondaryLabelColor
@@ -1135,8 +1137,7 @@ final class UsageTokenInfoButton: NSButton {
         target = self
         action = #selector(toggleDetails)
         translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: 16).isActive = true
-        heightAnchor.constraint(equalToConstant: 16).isActive = true
+        widthAnchor.constraint(equalToConstant: 14).isActive = true
 
         let content = NSStackView()
         content.orientation = .vertical
