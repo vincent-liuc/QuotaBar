@@ -3,15 +3,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "OpenAIUsageBar",
+    name: "QuotaBar",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "OpenAIUsageBar", targets: ["OpenAIUsageBar"])
+        .executable(name: "QuotaBar", targets: ["QuotaBar"])
     ],
     targets: [
         .executableTarget(
-            name: "OpenAIUsageBar",
-            path: "Sources/OpenAIUsageBar"
+            name: "QuotaBar",
+            path: "Sources/QuotaBar"
         )
     ]
 )
