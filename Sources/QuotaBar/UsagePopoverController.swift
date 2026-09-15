@@ -893,6 +893,7 @@ private final class UsageContentView: NSView {
         top.orientation = .horizontal
         top.alignment = .centerY
         top.spacing = 6
+        top.setCustomSpacing(0, after: cost)
 
         let effort = label(reasoningEffortTitle(record.reasoningEffort), size: 9, color: .tertiaryLabelColor)
         let date = label(usageDate(record.createdAt, timezone: timezone), size: 9, color: .tertiaryLabelColor)
@@ -1127,17 +1128,26 @@ final class UsageTokenInfoButton: NSButton {
 
     init(record: UsageRecord) {
         super.init(frame: .zero)
-        image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "查看 Token 明细")?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .medium))
-        imagePosition = .imageOnly
+        title = ""
         isBordered = false
-        contentTintColor = .secondaryLabelColor
         toolTip = "查看输入、输出和缓存 Token"
         setAccessibilityLabel("查看 Token 明细")
         target = self
         action = #selector(toggleDetails)
         translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: 14).isActive = true
+        widthAnchor.constraint(equalToConstant: 12).isActive = true
+
+        // Keep the drawing independent of the button's text alignment metrics.
+        let icon = UsageTokenInfoIconView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.setAccessibilityElement(false)
+        addSubview(icon)
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 8),
+            icon.heightAnchor.constraint(equalTo: icon.widthAnchor),
+            icon.centerXAnchor.constraint(equalTo: centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
 
         let content = NSStackView()
         content.orientation = .vertical
@@ -1191,6 +1201,26 @@ final class UsageTokenInfoButton: NSButton {
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil { detailsPopover.performClose(nil) }
         super.viewWillMove(toWindow: newWindow)
+    }
+}
+
+private final class UsageTokenInfoIconView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.secondaryLabelColor.setStroke()
+        NSColor.secondaryLabelColor.setFill()
+        let circle = NSBezierPath(ovalIn: bounds.insetBy(dx: 1.25, dy: 1.25))
+        circle.lineWidth = 0.65
+        circle.stroke()
+
+        let stem = NSBezierPath()
+        stem.lineWidth = 0.7
+        stem.lineCapStyle = .round
+        stem.move(to: NSPoint(x: bounds.midX, y: bounds.midY - 1.5))
+        stem.line(to: NSPoint(x: bounds.midX, y: bounds.midY + 0.2))
+        stem.stroke()
+        NSBezierPath(ovalIn: NSRect(x: bounds.midX - 0.4, y: bounds.midY + 1, width: 0.8, height: 0.8)).fill()
     }
 }
 

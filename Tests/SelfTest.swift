@@ -281,6 +281,62 @@ enum SelfTest {
         let buttons = infoButtons(in: view)
         require(buttons.count == 8, "each usage record has a token info button")
         require(!fields.contains { $0.stringValue.hasPrefix("输入 ") }, "token details are collapsed")
+        let tokenRow = buttons[0].superview as! NSStackView
+        let costField = tokenRow.arrangedSubviews[2] as! NSTextField
+        let tokenIcon = buttons[0].subviews.first!
+        let iconRect = tokenIcon.convert(tokenIcon.bounds, to: tokenRow)
+        let amountRect = costField.alignmentRect(forFrame: costField.frame)
+        let iconGap = iconRect.minX - amountRect.maxX
+        require(iconGap >= 1 && iconGap <= 3, "token icon sits close to the amount")
+        require(buttons[0].hitTest(NSPoint(x: iconRect.midX, y: iconRect.midY)) === buttons[0], "clicking the symbol reaches its button")
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            let theme = NSAppearance(named: appearance)!
+            tokenRow.appearance = theme
+            for pixelScale in [1, 2] {
+                theme.performAsCurrentDrawingAppearance {
+                    let bitmap = NSBitmapImageRep(
+                        bitmapDataPlanes: nil, pixelsWide: Int(tokenIcon.bounds.width) * pixelScale,
+                        pixelsHigh: Int(tokenIcon.bounds.height) * pixelScale, bitsPerSample: 8,
+                        samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+                    )!
+                    bitmap.size = tokenIcon.bounds.size
+                    let graphics = NSGraphicsContext(bitmapImageRep: bitmap)!
+                    NSGraphicsContext.saveGraphicsState()
+                    NSGraphicsContext.current = graphics
+                    tokenIcon.draw(tokenIcon.bounds)
+                    NSGraphicsContext.restoreGraphicsState()
+                    var paintedPixels: [NSPoint] = []
+                    for y in 0..<bitmap.pixelsHigh {
+                        for x in 0..<bitmap.pixelsWide where (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.1 {
+                            paintedPixels.append(NSPoint(x: x, y: y))
+                        }
+                    }
+                    require(!paintedPixels.isEmpty, "token icon is visible in each appearance")
+                    let paintedWidth = paintedPixels.map(\.x).max()! - paintedPixels.map(\.x).min()! + 1
+                    let paintedHeight = paintedPixels.map(\.y).max()! - paintedPixels.map(\.y).min()! + 1
+                    require(abs(paintedWidth - paintedHeight) <= 1, "rendered token icon stays circular")
+                    let paintedCenter = NSPoint(
+                        x: paintedPixels.map(\.x).min()! + paintedWidth / 2,
+                        y: paintedPixels.map(\.y).min()! + paintedHeight / 2
+                    )
+                    require(abs(paintedCenter.x - CGFloat(bitmap.pixelsWide) / 2) <= 0.5 && abs(paintedCenter.y - CGFloat(bitmap.pixelsHigh) / 2) <= 0.5, "rendered token icon is centered without clipping")
+                    let scale = CGFloat(bitmap.pixelsHigh) / tokenIcon.bounds.height
+                    require(paintedHeight / scale <= ceil(costField.font!.capHeight), "token icon matches the visible amount height")
+                    if let output = ProcessInfo.processInfo.environment["QUOTABAR_UI_TEST_OUTPUT"] {
+                        let suffix = "\(appearance == .aqua ? "light" : "dark")-\(pixelScale)x"
+                        try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output + ".icon-\(suffix).png"))
+                        if pixelScale == 1 {
+                            let rowBitmap = tokenRow.bitmapImageRepForCachingDisplay(in: tokenRow.bounds)!
+                            tokenRow.cacheDisplay(in: tokenRow.bounds, to: rowBitmap)
+                            try! rowBitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output + ".row-\(suffix).png"))
+                        }
+                        print("Token icon \(suffix): \(paintedWidth / scale) × \(paintedHeight / scale) pt; amount gap \(iconGap) pt")
+                    }
+                }
+            }
+        }
+        tokenRow.appearance = nil
         if ProcessInfo.processInfo.environment["QUOTABAR_UI_TEST_OUTPUT"] != nil {
         window.orderFront(nil)
         buttons[0].performClick(nil)
