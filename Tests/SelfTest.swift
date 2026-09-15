@@ -287,6 +287,10 @@ enum SelfTest {
         let iconRect = tokenIcon.convert(tokenIcon.bounds, to: tokenRow)
         let amountRect = costField.alignmentRect(forFrame: costField.frame)
         let iconGap = iconRect.minX - amountRect.maxX
+        let amountCenter = costField.convert(NSPoint(
+            x: 0, y: costField.firstBaselineOffsetFromTop - costField.font!.capHeight / 2
+        ), to: tokenRow)
+        require(abs(iconRect.midY - amountCenter.y) <= 0.25, "token icon is vertically centered on the amount digits")
         require(iconGap >= 1 && iconGap <= 3, "token icon sits close to the amount")
         require(buttons[0].hitTest(NSPoint(x: iconRect.midX, y: iconRect.midY)) === buttons[0], "clicking the symbol reaches its button")
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
@@ -322,7 +326,7 @@ enum SelfTest {
                     )
                     require(abs(paintedCenter.x - CGFloat(bitmap.pixelsWide) / 2) <= 0.5 && abs(paintedCenter.y - CGFloat(bitmap.pixelsHigh) / 2) <= 0.5, "rendered token icon is centered without clipping")
                     let scale = CGFloat(bitmap.pixelsHigh) / tokenIcon.bounds.height
-                    require(paintedHeight / scale <= ceil(costField.font!.capHeight), "token icon matches the visible amount height")
+                    require(abs(paintedHeight / scale - 8) <= 1 / scale, "token icon renders at the enlarged size within pixel rounding")
                     if let output = ProcessInfo.processInfo.environment["QUOTABAR_UI_TEST_OUTPUT"] {
                         let suffix = "\(appearance == .aqua ? "light" : "dark")-\(pixelScale)x"
                         try! bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output + ".icon-\(suffix).png"))

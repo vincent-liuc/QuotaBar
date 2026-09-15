@@ -890,6 +890,7 @@ private final class UsageContentView: NSView {
         let info = UsageTokenInfoButton(record: record)
         let top = NSStackView(views: [key, NSView(), cost, info])
         info.heightAnchor.constraint(equalTo: cost.heightAnchor).isActive = true
+        info.alignIcon(with: cost)
         top.orientation = .horizontal
         top.alignment = .centerY
         top.spacing = 6
@@ -1125,6 +1126,7 @@ private final class UsageContentView: NSView {
 @MainActor
 final class UsageTokenInfoButton: NSButton {
     let detailsPopover = NSPopover()
+    private let icon = UsageTokenInfoIconView()
 
     init(record: UsageRecord) {
         super.init(frame: .zero)
@@ -1138,15 +1140,13 @@ final class UsageTokenInfoButton: NSButton {
         widthAnchor.constraint(equalToConstant: 12).isActive = true
 
         // Keep the drawing independent of the button's text alignment metrics.
-        let icon = UsageTokenInfoIconView()
         icon.translatesAutoresizingMaskIntoConstraints = false
         icon.setAccessibilityElement(false)
         addSubview(icon)
         NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 8),
+            icon.widthAnchor.constraint(equalToConstant: 11),
             icon.heightAnchor.constraint(equalTo: icon.widthAnchor),
-            icon.centerXAnchor.constraint(equalTo: centerXAnchor),
-            icon.centerYAnchor.constraint(equalTo: centerYAnchor)
+            icon.centerXAnchor.constraint(equalTo: centerXAnchor)
         ])
 
         let content = NSStackView()
@@ -1189,6 +1189,11 @@ final class UsageTokenInfoButton: NSButton {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    func alignIcon(with amount: NSTextField) {
+        let capHeight = amount.font?.capHeight ?? 0
+        icon.centerYAnchor.constraint(equalTo: amount.firstBaselineAnchor, constant: -capHeight / 2).isActive = true
+    }
+
     @objc private func toggleDetails() {
         if detailsPopover.isShown {
             detailsPopover.performClose(nil)
@@ -1208,19 +1213,27 @@ private final class UsageTokenInfoIconView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func draw(_ dirtyRect: NSRect) {
+        let scale: CGFloat = 1.3
         NSColor.secondaryLabelColor.setStroke()
         NSColor.secondaryLabelColor.setFill()
-        let circle = NSBezierPath(ovalIn: bounds.insetBy(dx: 1.25, dy: 1.25))
-        circle.lineWidth = 0.65
+        let diameter = 5.5 * scale
+        let circle = NSBezierPath(ovalIn: NSRect(
+            x: bounds.midX - diameter / 2, y: bounds.midY - diameter / 2,
+            width: diameter, height: diameter
+        ))
+        circle.lineWidth = 0.65 * scale
         circle.stroke()
 
         let stem = NSBezierPath()
-        stem.lineWidth = 0.7
+        stem.lineWidth = 0.7 * scale
         stem.lineCapStyle = .round
-        stem.move(to: NSPoint(x: bounds.midX, y: bounds.midY - 1.5))
-        stem.line(to: NSPoint(x: bounds.midX, y: bounds.midY + 0.2))
+        stem.move(to: NSPoint(x: bounds.midX, y: bounds.midY - 1.5 * scale))
+        stem.line(to: NSPoint(x: bounds.midX, y: bounds.midY + 0.2 * scale))
         stem.stroke()
-        NSBezierPath(ovalIn: NSRect(x: bounds.midX - 0.4, y: bounds.midY + 1, width: 0.8, height: 0.8)).fill()
+        NSBezierPath(ovalIn: NSRect(
+            x: bounds.midX - 0.4 * scale, y: bounds.midY + scale,
+            width: 0.8 * scale, height: 0.8 * scale
+        )).fill()
     }
 }
 
