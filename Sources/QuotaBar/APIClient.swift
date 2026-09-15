@@ -570,6 +570,9 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
                 apiKey: UsageRecordAPIKey(name: item.tokenName),
                 model: item.modelName,
                 reasoningEffort: reasoningEffort(from: item.other),
+                inputTokens: item.promptTokens,
+                outputTokens: item.completionTokens,
+                cacheReadTokens: cacheReadTokens(from: item.other),
                 actualCost: max(item.quota / max(quotaPerUnit, 1), 0),
                 createdAt: Date(timeIntervalSince1970: TimeInterval(item.createdAt))
             )
@@ -590,6 +593,14 @@ actor APIClient: NSObject, UsageFetching, URLSessionTaskDelegate {
             updatedAt: timestamp.map { Date(timeIntervalSince1970: TimeInterval($0)) },
             group: token.group
         )
+    }
+
+    private func cacheReadTokens(from other: String?) -> Int64? {
+        guard let other, let data = other.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let number = object["cache_tokens"] as? NSNumber,
+              String(cString: number.objCType) != "c" else { return nil }
+        return number.int64Value
     }
 
     private func reasoningEffort(from other: String?) -> String? {

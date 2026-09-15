@@ -247,8 +247,14 @@ enum SelfTest {
                 dailyUsage: DailyUsage(used: 10, total: 50, subscriptionCount: 2),
                 accountMetrics: AccountMetrics(totalTokens: 2_300_000_000, totalActualCost: 2089.43, image2RequestCount: 456),
                 keys: [usageKey(id: 1, total: 300, used: 50, today: 5)],
-                usageRecords: [],
-                capabilities: [.subscriptions, .accountMetrics]
+                usageRecords: (0..<8).map { index in
+                    UsageRecord(id: index, apiKeyID: 1, apiKey: UsageRecordAPIKey(name: "SuperV-long-api-key"),
+                                model: "gpt-6-astra", reasoningEffort: "low",
+                                inputTokens: index == 1 ? nil : 224, outputTokens: index == 1 ? 0 : 87,
+                                cacheReadTokens: index == 1 ? nil : 142208,
+                                actualCost: 0.18798, createdAt: Date())
+                },
+                capabilities: [.subscriptions, .accountMetrics, .usageHistory]
             ))
             await store.refresh()
         }
@@ -268,6 +274,13 @@ enum SelfTest {
         let fields = labels(in: view)
         for value in ["2 个订阅", "每日用量（2 个订阅）", "$750.00", "$225.00", "$525.00"] {
             require(fields.contains { $0.stringValue == value }, "aggregate UI renders \(value)")
+        }
+        let tokenFields = fields.filter { $0.stringValue.hasPrefix("输入 ") }
+        require(tokenFields.count == 8, "each usage record renders tokens")
+        require(tokenFields.contains { $0.stringValue == "输入 —   输出 0   缓存 —" }, "unknown and zero tokens remain distinct in UI")
+        for field in tokenFields {
+            require(field.bounds.width >= field.intrinsicContentSize.width, "token breakdown fits without truncation")
+            require(field.toolTip?.contains("缓存读取 Token") == true, "exact token values available on hover")
         }
         let countLabel = fields.first { $0.stringValue == "2 个订阅" }!
         require(countLabel.toolTip?.contains("最近一次订阅重置") == true, "aggregate tooltip distinguishes the next individual reset")
@@ -497,13 +510,15 @@ enum SelfTest {
     }
 
     private static func testDecodesUsageHistory() throws {
-        let json = #"{"code":0,"message":"success","data":{"items":[{"id":91,"api_key_id":104,"api_key":{"name":"Primary"},"model":"gpt-5.6","reasoning_effort":"high","actual_cost":0.012345,"created_at":"2026-08-12T10:31:58.067319+08:00"},{"id":92,"api_key_id":105,"api_key":null,"model":"gpt-5.6-mini","reasoning_effort":null,"actual_cost":0,"created_at":"2026-08-12T10:30:00+08:00"}],"total":2,"page":1,"page_size":50,"pages":1}}"#
+        let json = #"{"code":0,"message":"success","data":{"items":[{"id":91,"input_tokens":224,"output_tokens":87,"cache_read_tokens":142208,"api_key_id":104,"api_key":{"name":"Primary"},"model":"gpt-5.6","reasoning_effort":"high","actual_cost":0.012345,"created_at":"2026-08-12T10:31:58.067319+08:00"},{"id":92,"api_key_id":105,"api_key":null,"model":"gpt-5.6-mini","reasoning_effort":null,"actual_cost":0,"created_at":"2026-08-12T10:30:00+08:00"}],"total":2,"page":1,"page_size":50,"pages":1}}"#
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
         let result = try decoder.decode(APIEnvelope<UsageRecordListData>.self, from: Data(json.utf8))
         require(result.data.items[0].apiKeyName == "Primary", "usage history nested API key name")
         require(result.data.items[0].reasoningEffort == "high", "usage history reasoning effort")
         require(result.data.items[0].actualCost == 0.012345, "usage history actual cost")
+        require(result.data.items[0].inputTokens == 224 && result.data.items[0].outputTokens == 87 && result.data.items[0].cacheReadTokens == 142208, "usage history token breakdown")
+        require(result.data.items[1].inputTokens == nil && result.data.items[1].outputTokens == nil && result.data.items[1].cacheReadTokens == nil, "missing tokens remain unknown")
         require(result.data.items[1].apiKeyName == "API Key #105", "usage history missing key fallback")
         require(result.data.items[1].reasoningEffort == nil, "usage history optional reasoning effort")
     }
@@ -1579,7 +1594,7 @@ enum SelfTest {
                 require(tokenName == "Primary", "daily stat filters exact token name")
                 return mockResponse(url: url, json: #"{"success":true,"message":"success","data":{"quota":100000,"rpm":2,"tpm":1000}}"#)
             case "/api/log/self":
-                return mockResponse(url: url, json: #"{"success":true,"message":"success","data":{"page":1,"page_size":50,"total":1,"items":[{"id":99,"user_id":3010,"created_at":1786671000,"type":0,"content":"","username":"vincentc","token_name":"Primary","model_name":"gpt-5.6","quota":150000,"prompt_tokens":100,"completion_tokens":20,"use_time":2,"is_stream":true,"channel":1,"channel_name":"main","token_id":7,"group":"GPT_high","ip":"","request_id":"req","other":"{\"reasoning_effort\":\"high\"}"}]}}"#)
+                return mockResponse(url: url, json: #"{"success":true,"message":"success","data":{"page":1,"page_size":50,"total":1,"items":[{"id":99,"user_id":3010,"created_at":1786671000,"type":0,"content":"","username":"vincentc","token_name":"Primary","model_name":"gpt-5.6","quota":150000,"prompt_tokens":100,"completion_tokens":20,"use_time":2,"is_stream":true,"channel":1,"channel_name":"main","token_id":7,"group":"GPT_high","ip":"","request_id":"req","other":"{\"reasoning_effort\":\"high\",\"cache_tokens\":80}"}]}}"#)
             default:
                 throw APIClientError.invalidResponse
             }
@@ -1601,6 +1616,7 @@ enum SelfTest {
         require(usage.accountMetrics?.balance == 2230.8 && usage.accountMetrics?.totalActualCost == 770.2, "New API balance and cost converted")
         require(usage.accountMetrics?.requestCount == 42 && usage.accountMetrics?.totalTokens == 579, "New API account metrics mapped")
         require(usage.usageRecords?.first?.actualCost == 0.3 && usage.usageRecords?.first?.reasoningEffort == "high", "New API log fields mapped")
+        require(usage.usageRecords?.first?.inputTokens == 100 && usage.usageRecords?.first?.outputTokens == 20 && usage.usageRecords?.first?.cacheReadTokens == 80, "New API token breakdown mapped")
         require(usage.capabilities == [.accountMetrics, .apiKeyDailyUsage, .usageHistory], "New API capabilities detected")
     }
 

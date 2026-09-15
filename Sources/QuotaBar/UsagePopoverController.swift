@@ -887,7 +887,24 @@ private final class UsageContentView: NSView {
         let cost = label(usageCost(record.actualCost), size: 10, weight: .medium)
         cost.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
         cost.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let top = NSStackView(views: [key, model, NSView(), cost])
+        let tokenText = [
+            ("输入", record.inputTokens),
+            ("输出", record.outputTokens),
+            ("缓存", record.cacheReadTokens)
+        ].map { title, value in
+            "\(title) \(value.map { compactTokenCount($0) } ?? "—")"
+        }.joined(separator: "   ")
+        let tokens = label(tokenText, size: 9, color: .secondaryLabelColor)
+        tokens.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        tokens.setContentCompressionResistancePriority(.required, for: .horizontal)
+        tokens.toolTip = [
+            ("输入 Token", record.inputTokens),
+            ("输出 Token", record.outputTokens),
+            ("缓存读取 Token", record.cacheReadTokens)
+        ].map { title, value in
+            "\(title)：\(value.map { String($0) } ?? "未提供")"
+        }.joined(separator: "\n")
+        let top = NSStackView(views: [key, NSView(), tokens, cost])
         top.orientation = .horizontal
         top.alignment = .firstBaseline
         top.spacing = 6
@@ -895,7 +912,8 @@ private final class UsageContentView: NSView {
         let effort = label(reasoningEffortTitle(record.reasoningEffort), size: 9, color: .tertiaryLabelColor)
         let date = label(usageDate(record.createdAt, timezone: timezone), size: 9, color: .tertiaryLabelColor)
         date.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
-        let bottom = NSStackView(views: [effort, NSView(), date])
+        let bottom = NSStackView(views: [model, effort, NSView(), date])
+        bottom.spacing = 4
         bottom.orientation = .horizontal
         bottom.alignment = .firstBaseline
 
@@ -904,6 +922,8 @@ private final class UsageContentView: NSView {
         row.alignment = .leading
         row.spacing = 2
         row.edgeInsets = NSEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
+        top.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        bottom.widthAnchor.constraint(equalToConstant: 286).isActive = true
         row.widthAnchor.constraint(equalToConstant: 286).isActive = true
         row.heightAnchor.constraint(equalToConstant: 37).isActive = true
         return row

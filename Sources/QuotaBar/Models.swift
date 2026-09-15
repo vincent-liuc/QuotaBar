@@ -115,9 +115,13 @@ struct NewAPILogItem: Decodable, Sendable {
     let quota: Double
     let tokenID: Int?
     let other: String?
+    let promptTokens: Int64?
+    let completionTokens: Int64?
 
     enum CodingKeys: String, CodingKey {
         case id, quota, other
+        case promptTokens = "prompt_tokens"
+        case completionTokens = "completion_tokens"
         case createdAt = "created_at"
         case tokenName = "token_name"
         case modelName = "model_name"
@@ -184,6 +188,9 @@ struct UsageRecord: Decodable, Equatable, Sendable {
     let apiKey: UsageRecordAPIKey?
     let model: String
     let reasoningEffort: String?
+    let inputTokens: Int64?
+    let outputTokens: Int64?
+    let cacheReadTokens: Int64?
     let actualCost: Double
     let createdAt: Date
 
@@ -192,6 +199,9 @@ struct UsageRecord: Decodable, Equatable, Sendable {
         case apiKeyID = "api_key_id"
         case apiKey = "api_key"
         case reasoningEffort = "reasoning_effort"
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case cacheReadTokens = "cache_read_tokens"
         case actualCost = "actual_cost"
         case createdAt = "created_at"
     }
